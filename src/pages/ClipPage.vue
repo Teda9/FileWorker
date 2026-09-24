@@ -4,7 +4,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor } from "@codemirror/view";
 import { onMounted, onBeforeUnmount, ref } from "vue";
 import useClipStore from "@/store/clip";
-import { GetFile, PutFile } from "@/api";
+import { GetFile, HeadFile, PutFile } from "@/api";
 import { getRandomFilename } from "@/utils/utils";
 import { useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
@@ -21,9 +21,11 @@ const loadError = ref('');
 const editorElement = ref<HTMLElement>();
 const filename = ref(editTarget || getRandomFilename());
 const savedUrl = ref('');
+const storeType = ref('text');
 let editor: EditorView | undefined;
 let isLoadingContent = false;
 const clipStore = useClipStore();
+const MAX_EDIT_BYTES = 2 * 1024 * 1024;
 
 const startState = EditorState.create({
   doc: "",
@@ -48,8 +50,31 @@ const loadExistingContent = async () => {
   isLoadingExisting.value = true;
   loadError.value = '';
   try {
+    const head = await HeadFile(editTarget);
+    const contentLength = Number(head.headers['content-length']);
+    if (Number.isFinite(contentLength) && contentLength > MAX_EDIT_BYTES) {
+      loadError.value = $t('clip.edit_too_large');
+      saveStatus.value = 'failed';
+      return;
+    }
+
     const response = await GetFile(editTarget);
-    if (response.headers['x-store-type'] !== 'text') {
+    const bytes = response.data as ArrayBuffer;
+    if (bytes.byteLength > MAX_EDIT_BYTES) {
+      loadError.value = $t('clip.edit_too_large');
+      saveStatus.value = 'failed';
+      return;
+    }
+
+    let content: string;
+    try {
+      content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch {
+      loadError.value = $t('clip.edit_text_only');
+      saveStatus.value = 'failed';
+      return;
+    }
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(content)) {
       loadError.value = $t('clip.edit_text_only');
       saveStatus.value = 'failed';
       return;
@@ -59,11 +84,12 @@ const loadExistingContent = async () => {
     if (visibility === 'public' || visibility === 'private') {
       clipStore.visibility = visibility;
     }
+    storeType.value = response.headers['x-store-type'] || 'file';
     isLoadedExisting.value = true;
-    code.value = response.data;
+    code.value = content;
     isLoadingContent = true;
     editor?.dispatch({
-      changes: { from: 0, to: editor.state.doc.length, insert: response.data },
+      changes: { from: 0, to: editor.state.doc.length, insert: content },
     });
     isLoadingContent = false;
     saveStatus.value = 'saved';
@@ -99,7 +125,7 @@ const onSaveBtnClick = async () => {
 
   saveStatus.value = 'saving';
   try {
-    await PutFile(filename.value, code.value, clipStore.visibility, "text");
+    await PutFile(filename.value, code.value, clipStore.visibility, storeType.value);
     saveStatus.value = 'saved';
     savedUrl.value = `/${encodeURIComponent(filename.value)}`;
   } catch {
@@ -147,7 +173,10 @@ onBeforeUnmount(() => {
       </a>
     </div>
 
-    <p v-if="loadError" class="load-error" role="alert">{{ loadError }}</p>
+    <p v-if="loadError" class="load-error" role="alert">
+      {{ loadError }}
+      <router-link to="/filemanage">{{ $t('clip.back_to_files') }}</router-link>
+    </p>
 
     <div class="text-area">
       <div class="editor-header">

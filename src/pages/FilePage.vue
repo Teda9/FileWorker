@@ -2,11 +2,16 @@
 import { reactive, ref } from 'vue';
 import useFileStore from '@/store/file';
 import { formatBytes } from '@/utils/utils';
-import { PutFile } from '@/api';
+import { HeadFile, PutFile } from '@/api';
+import { useI18n } from 'vue-i18n';
 
+const { t: $t } = useI18n();
 const fileStore = useFileStore();
 const fileUploadInput = ref<HTMLInputElement>();
 const isDragging = ref(false);
+const isProcessingFiles = ref(false);
+const isCheckingFiles = ref(false);
+const uploadError = ref('');
 
 interface UploadedFile {
   id: number;
@@ -22,29 +27,77 @@ let nextUploadId = 0;
 const openPicker = () => fileUploadInput.value?.click();
 
 const uploadFiles = async (files: FileList | File[]) => {
-  const visibility = fileStore.visibility;
+  if (isProcessingFiles.value) return;
   const selectedFiles = Array.from(files);
-  const queue = selectedFiles.map((file) => {
-    const item = reactive<UploadedFile>({
-      id: nextUploadId++,
-      name: file.name,
-      size: file.size,
-      visibility,
-      status: 'uploading',
-    });
-    return { item, file };
-  });
+  if (!selectedFiles.length) return;
 
-  uploadedFiles.value = [...queue.map(({ item }) => item), ...uploadedFiles.value];
-
-  await Promise.all(queue.map(async ({ item, file }) => {
-    try {
-      await PutFile(file.name, file, visibility, "file");
-      item.status = 'done';
-    } catch {
-      item.status = 'failed';
+  isProcessingFiles.value = true;
+  uploadError.value = '';
+  try {
+    const nameCounts = new Map<string, number>();
+    selectedFiles.forEach(({ name }) => nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1));
+    const duplicateNames = [...nameCounts.entries()].filter(([, count]) => count > 1).map(([name]) => name);
+    if (duplicateNames.length) {
+      uploadError.value = $t('file.duplicate_names', { filenames: duplicateNames.join(', ') });
+      return;
     }
-  }));
+
+    isCheckingFiles.value = true;
+    let existingNames: string[];
+    try {
+      const checks = await Promise.all(selectedFiles.map(async ({ name }) => {
+        try {
+          await HeadFile(name);
+          return name;
+        } catch (error) {
+          const status = (error as { response?: { status?: number } }).response?.status;
+          if (status === 404) return null;
+          throw error;
+        }
+      }));
+      existingNames = [...new Set(checks.filter((name): name is string => name !== null))];
+    } catch {
+      uploadError.value = $t('file.overwrite_check_failed');
+      return;
+    } finally {
+      isCheckingFiles.value = false;
+    }
+
+    if (existingNames.length && !window.confirm($t('file.overwrite_confirm', { filenames: existingNames.join(', ') }))) {
+      return;
+    }
+
+    const visibility = fileStore.visibility;
+    const queue = selectedFiles.map((file) => {
+      const item = reactive<UploadedFile>({
+        id: nextUploadId++,
+        name: file.name,
+        size: file.size,
+        visibility,
+        status: 'uploading',
+      });
+      return { item, file };
+    });
+
+    uploadedFiles.value = [...queue.map(({ item }) => item), ...uploadedFiles.value];
+
+    const failedNames: string[] = [];
+    await Promise.all(queue.map(async ({ item, file }) => {
+      try {
+        await PutFile(file.name, file, visibility, "file");
+        item.status = 'done';
+      } catch {
+        item.status = 'failed';
+        failedNames.push(file.name);
+      }
+    }));
+    if (failedNames.length) {
+      uploadError.value = $t('file.upload_failed_names', { filenames: [...new Set(failedNames)].join(', ') });
+    }
+  } finally {
+    isCheckingFiles.value = false;
+    isProcessingFiles.value = false;
+  }
 };
 
 const onFilesSelected = (event: Event) => {
@@ -74,11 +127,12 @@ const onDrop = (event: DragEvent) => {
     </div>
 
     <div class="file-area">
-      <input ref="fileUploadInput" type="file" class="visually-hidden" multiple @change="onFilesSelected" />
+      <input ref="fileUploadInput" type="file" class="visually-hidden" multiple :disabled="isProcessingFiles" @change="onFilesSelected" />
       <button
         class="drop-zone"
         :class="{ 'is-dragging': isDragging }"
         type="button"
+        :disabled="isProcessingFiles"
         @click="openPicker"
         @dragover.prevent="isDragging = true"
         @dragleave.prevent="isDragging = false"
@@ -101,6 +155,9 @@ const onDrop = (event: DragEvent) => {
         </select>
       </div>
     </div>
+
+    <p v-if="isCheckingFiles" class="upload-feedback" role="status">{{ $t('file.checking') }}</p>
+    <p v-if="uploadError" class="upload-error" role="alert">{{ uploadError }}</p>
 
     <section v-if="uploadedFiles.length" class="upload-queue" aria-live="polite">
       <h2>{{ $t('file.upload_list') }}</h2>
@@ -238,6 +295,24 @@ h1 {
 
 .upload-queue {
   margin-top: 24px;
+}
+
+.upload-feedback,
+.upload-error {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.upload-feedback {
+  color: #475467;
+  background: #f2f4f7;
+}
+
+.upload-error {
+  color: #b42318;
+  background: #fef3f2;
 }
 
 .upload-queue h2 {

@@ -67,7 +67,7 @@ export const onRequestHead: PagesFunction<Env> = async (context) => {
 
     const headers = new Headers();
     for (const [key, value] of Object.entries(response.Metadata ?? {})) {
-        headers.set(key, value);
+        if (typeof value === 'string') headers.set(key, value);
     }
     if (response.ContentType) headers.set('content-type', response.ContentType);
     if (response.ContentLength !== undefined) headers.set('content-length', response.ContentLength.toString());

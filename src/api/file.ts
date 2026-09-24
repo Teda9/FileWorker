@@ -28,7 +28,7 @@ const DeleteFile = async (filename: string) => {
 
 const GetFile = async (filename: string) => {
     const url = `/${encodeURIComponent(filename)}`;
-    return axios.get<string>(url, { responseType: 'text' });
+    return axios.get<ArrayBuffer>(url, { responseType: 'arraybuffer' });
 }
 
 const HeadFile = async (filename: string) => {

@@ -14,8 +14,8 @@
     "deploy": "npm run build && wrangler pages deploy ./dist"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.536.0",
-    "@aws-sdk/lib-storage": "^3.537.0",
+    "@aws-sdk/client-s3": "^3.1139.0",
+    "@aws-sdk/lib-storage": "^3.1139.0",
     "@aws-sdk/s3-request-presigner": "^3.536.0",
     "@codemirror/basic-setup": "^0.20.0",
     "@codemirror/lang-css": "^6.2.1",
@@ -23,7 +23,7 @@
     "@unocss/reset": "^0.58.5",
     "axios": "^1.6.8",
     "codemirror": "^6.0.1",
-    "cookie": "^0.6.0",
+    "cookie": "^0.7.2",
     "js-cookie": "^3.0.5",
     "mdui": "^2.0.6",
     "mime": "^4.0.1",

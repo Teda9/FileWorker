@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { formatBytes } from '@/utils/utils';
-import { DeleteFile, HeadFile, ListFiles, RenameFile } from '@/api';
+import { DeleteFile, ListFiles, RenameFile } from '@/api';
 import type { _Object } from '@aws-sdk/client-s3';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
@@ -72,16 +72,8 @@ const onCopyLinkClick = async (key?: string) => {
 const onEditFileClick = async (key?: string) => {
     if (!key) return;
     errorMessage.value = '';
-    try {
-        const response = await HeadFile(displayFilename(key));
-        if (response.headers['x-store-type'] !== 'text') {
-            errorMessage.value = $t('filemanage.edit_text_only');
-            return;
-        }
-        await router.push({ path: '/clip', query: { edit: displayFilename(key) } });
-    } catch {
-        errorMessage.value = $t('filemanage.edit_failed');
-    }
+    successMessage.value = '';
+    await router.push({ path: '/clip', query: { edit: displayFilename(key) } });
 };
 
 const onRenameFileClick = async (key?: string) => {
