@@ -1,4 +1,4 @@
-import { GetObjectCommand, CopyObjectCommand, DeleteObjectCommand, GetObjectCommandOutput } from "@aws-sdk/client-s3";
+import { GetObjectCommand, CopyObjectCommand, DeleteObjectCommand, GetObjectCommandOutput, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import mime from 'mime/lite';
 
@@ -46,6 +46,35 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
             headers,
         }
     );
+};
+
+export const onRequestHead: PagesFunction<Env> = async (context) => {
+    const { params, env, request } = context;
+    const filename = params.filename as string;
+    const { BUCKET } = env;
+    const s3 = createS3Client(env);
+
+    let response;
+    try {
+        response = await s3.send(new HeadObjectCommand({ Bucket: BUCKET!, Key: filename }));
+    } catch {
+        return new Response("Not found", { status: 404 });
+    }
+
+    if (response.Metadata?.['x-store-visibility'] !== "public" && !(await auth(env, request))) {
+        return new Response("Not found", { status: 404 });
+    }
+
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(response.Metadata ?? {})) {
+        headers.set(key, value);
+    }
+    if (response.ContentType) headers.set('content-type', response.ContentType);
+    if (response.ContentLength !== undefined) headers.set('content-length', response.ContentLength.toString());
+    if (response.LastModified) headers.set('last-modified', response.LastModified.toUTCString());
+    if (response.ETag) headers.set('etag', response.ETag);
+
+    return new Response(null, { headers });
 };
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {

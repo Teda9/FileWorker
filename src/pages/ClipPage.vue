@@ -4,15 +4,26 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor } from "@codemirror/view";
 import { onMounted, onBeforeUnmount, ref } from "vue";
 import useClipStore from "@/store/clip";
-import { PutFile } from "@/api";
+import { GetFile, PutFile } from "@/api";
 import { getRandomFilename } from "@/utils/utils";
+import { useRoute } from "vue-router";
+import { useI18n } from "vue-i18n";
 
+const route = useRoute();
+const { t: $t } = useI18n();
+const editTarget = typeof route.query.edit === 'string' ? route.query.edit : '';
+const isEditingExisting = Boolean(editTarget);
 const code = ref("");
 const saveStatus = ref<'unsaved' | 'saving' | 'saved' | 'failed'>('unsaved');
+const isLoadingExisting = ref(false);
+const isLoadedExisting = ref(!isEditingExisting);
+const loadError = ref('');
 const editorElement = ref<HTMLElement>();
-const filename = ref(getRandomFilename());
+const filename = ref(editTarget || getRandomFilename());
 const savedUrl = ref('');
 let editor: EditorView | undefined;
+let isLoadingContent = false;
+const clipStore = useClipStore();
 
 const startState = EditorState.create({
   doc: "",
@@ -24,7 +35,7 @@ const startState = EditorState.create({
     dropCursor(),
     EditorView.updateListener.of((update) => {
       code.value = update.state.doc.toString();
-      if (update.docChanged) {
+      if (update.docChanged && !isLoadingContent) {
         saveStatus.value = 'unsaved';
         savedUrl.value = '';
       }
@@ -32,24 +43,59 @@ const startState = EditorState.create({
   ]
 });
 
-onMounted(() => {
+const loadExistingContent = async () => {
+  if (!editTarget) return;
+  isLoadingExisting.value = true;
+  loadError.value = '';
+  try {
+    const response = await GetFile(editTarget);
+    if (response.headers['x-store-type'] !== 'text') {
+      loadError.value = $t('clip.edit_text_only');
+      saveStatus.value = 'failed';
+      return;
+    }
+
+    const visibility = response.headers['x-store-visibility'];
+    if (visibility === 'public' || visibility === 'private') {
+      clipStore.visibility = visibility;
+    }
+    isLoadedExisting.value = true;
+    code.value = response.data;
+    isLoadingContent = true;
+    editor?.dispatch({
+      changes: { from: 0, to: editor.state.doc.length, insert: response.data },
+    });
+    isLoadingContent = false;
+    saveStatus.value = 'saved';
+    savedUrl.value = `/${encodeURIComponent(editTarget)}`;
+  } catch {
+    loadError.value = $t('clip.edit_load_failed');
+    saveStatus.value = 'failed';
+  } finally {
+    isLoadingExisting.value = false;
+  }
+};
+
+onMounted(async () => {
   editor = new EditorView({
     state: startState,
     parent: editorElement.value!,
   });
+  if (isEditingExisting) {
+    await loadExistingContent();
+  }
   editor.focus();
 });
 
-const clipStore = useClipStore();
-
 const refreshRandomFileName = () => {
+  if (isEditingExisting) return;
   filename.value = getRandomFilename();
   saveStatus.value = 'unsaved';
   savedUrl.value = '';
 };
 
 const onSaveBtnClick = async () => {
-  if (saveStatus.value === 'saving') return;
+  if (saveStatus.value === 'saving' || isLoadingExisting.value || !isLoadedExisting.value) return;
 
   saveStatus.value = 'saving';
   try {
@@ -91,15 +137,17 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="clip-page">
-    <div class="clip-heading">
+    <div class="page-heading clip-heading">
       <div>
-        <h1>{{ $t('page_title.clip') }}</h1>
-        <p>{{ $t('index.clip_description') }}</p>
+        <h1>{{ isEditingExisting ? $t('clip.edit_title') : $t('page_title.clip') }}</h1>
+        <p>{{ isEditingExisting ? $t('clip.edit_description') : $t('index.clip_description') }}</p>
       </div>
-      <a v-if="savedUrl" class="open-saved" :href="savedUrl" target="_blank" rel="noopener">
+      <a v-if="savedUrl" class="ui-button open-saved" :href="savedUrl" target="_blank" rel="noopener">
         {{ $t('clip.open_saved') }} ↗
       </a>
     </div>
+
+    <p v-if="loadError" class="load-error" role="alert">{{ loadError }}</p>
 
     <div class="text-area">
       <div class="editor-header">
@@ -109,13 +157,14 @@ onBeforeUnmount(() => {
           type="text"
           :placeholder="$t('common.filename')"
           :aria-label="$t('common.filename')"
+          :disabled="isEditingExisting"
           @input="saveStatus = 'unsaved'; savedUrl = ''"
         />
-        <button class="filename-refresh" type="button" :aria-label="$t('clip.new_name')" @click="refreshRandomFileName">
+        <button v-if="!isEditingExisting" class="filename-refresh" type="button" :aria-label="$t('clip.new_name')" @click="refreshRandomFileName">
           ↻
         </button>
         <span class="save-status" :class="`status-${saveStatus}`" role="status">
-          {{ $t(`clip.status_${saveStatus}`) }}
+          {{ isLoadingExisting ? $t('common.loading') : $t(`clip.status_${saveStatus}`) }}
         </span>
       </div>
       <div ref="editorElement" class="editor-host"></div>
@@ -129,7 +178,7 @@ onBeforeUnmount(() => {
           <option value="private">{{ $t('common.private') }}</option>
           <option value="public">{{ $t('common.public') }}</option>
         </select>
-        <button class="save-btn" type="button" :disabled="saveStatus === 'saving'" @click="onSaveBtnClick">
+        <button class="ui-button ui-button--primary save-btn" type="button" :disabled="saveStatus === 'saving' || isLoadingExisting || !isLoadedExisting" @click="onSaveBtnClick">
           {{ saveStatus === 'saving' ? $t('common.saving') : $t('common.save') }}
         </button>
       </div>
@@ -144,11 +193,7 @@ onBeforeUnmount(() => {
 }
 
 .clip-heading {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 h1 {
@@ -166,13 +211,6 @@ h1 {
 
 .open-saved {
   flex: 0 0 auto;
-  color: #175cd3;
-  font-size: 13px;
-  text-decoration: none;
-}
-
-.open-saved:hover {
-  text-decoration: underline;
 }
 
 .text-area {
@@ -214,6 +252,11 @@ h1 {
   box-shadow: 0 0 0 3px #2e90fa1f;
 }
 
+.filename-input:disabled {
+  color: #667085;
+  background: #f9fafb;
+}
+
 .filename-refresh {
   width: 34px;
   height: 34px;
@@ -242,6 +285,13 @@ h1 {
 
 .status-unsaved {
   color: #b54708;
+}
+
+.load-error {
+  padding: 12px 14px;
+  color: #b42318;
+  background: #fef3f2;
+  border-radius: 9px;
 }
 
 .editor-host :deep(.cm-editor) {
@@ -273,22 +323,6 @@ h1 {
 
 .save-btn {
   margin-left: auto;
-  padding: 9px 17px;
-  color: #fff;
-  font-weight: 650;
-  background: #175cd3;
-  border: 0;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.save-btn:hover:not(:disabled) {
-  background: #1849a9;
-}
-
-.save-btn:disabled {
-  cursor: wait;
-  opacity: 0.65;
 }
 
 @media (max-width: 520px) {

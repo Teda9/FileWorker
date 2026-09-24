@@ -67,8 +67,10 @@ const onDrop = (event: DragEvent) => {
 <template>
   <section class="file-page">
     <div class="page-heading">
-      <h1>{{ $t('page_title.file') }}</h1>
-      <p>{{ $t('index.file_description') }}</p>
+      <div>
+        <h1>{{ $t('page_title.file') }}</h1>
+        <p>{{ $t('index.file_description') }}</p>
+      </div>
     </div>
 
     <div class="file-area">
@@ -82,7 +84,11 @@ const onDrop = (event: DragEvent) => {
         @dragleave.prevent="isDragging = false"
         @drop="onDrop"
       >
-        <span class="upload-icon" aria-hidden="true">↑</span>
+        <span class="upload-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 15V4m0 0L7 9m5-5 5 5M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4" />
+          </svg>
+        </span>
         <strong>{{ $t('file.drop_title') }}</strong>
         <span>{{ $t('file.drop_hint') }}</span>
       </button>
@@ -105,7 +111,7 @@ const onDrop = (event: DragEvent) => {
         </div>
         <a
           v-if="file.status === 'done'"
-          class="open-file"
+          class="ui-button open-file"
           :href="`/${encodeURIComponent(file.name)}`"
           target="_blank"
           rel="noopener"
@@ -126,7 +132,7 @@ const onDrop = (event: DragEvent) => {
 }
 
 .page-heading {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 h1 {
@@ -181,10 +187,13 @@ h1 {
   height: 48px;
   place-items: center;
   color: #175cd3;
-  font-size: 27px;
-  font-weight: 700;
   background: #eff6ff;
   border-radius: 14px;
+}
+
+.upload-icon svg {
+  width: 24px;
+  height: 24px;
 }
 
 .drop-zone strong {
@@ -280,13 +289,6 @@ h1 {
 
 .open-file {
   flex: 0 0 auto;
-  color: #175cd3;
-  font-size: 13px;
-  text-decoration: none;
-}
-
-.open-file:hover {
-  text-decoration: underline;
 }
 
 .status-spinner {

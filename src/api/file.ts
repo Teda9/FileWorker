@@ -26,4 +26,19 @@ const DeleteFile = async (filename: string) => {
     return response.data;
 }
 
-export { PutFile, PatchFile, DeleteFile }
+const GetFile = async (filename: string) => {
+    const url = `/${encodeURIComponent(filename)}`;
+    return axios.get<string>(url, { responseType: 'text' });
+}
+
+const HeadFile = async (filename: string) => {
+    const url = `/${encodeURIComponent(filename)}`;
+    return axios.head(url);
+}
+
+const RenameFile = async (sourceKey: string, filename: string) => {
+    const response = await axios.post('/api/rename', { sourceKey, filename });
+    return response.data;
+}
+
+export { PutFile, PatchFile, DeleteFile, GetFile, HeadFile, RenameFile }

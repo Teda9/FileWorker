@@ -68,7 +68,7 @@ const onSubmit = async () => {
                 @input="loginError = ''"
             />
             <p v-if="loginError" class="login-error" role="alert">{{ loginError }}</p>
-            <button class="login-button" type="submit" :disabled="isSubmitting">
+            <button class="ui-button ui-button--primary login-button" type="submit" :disabled="isSubmitting">
                 {{ isSubmitting ? $t('common.loading') : $t('login.login_button') }}
             </button>
         </form>
@@ -137,21 +137,5 @@ h1 {
 
 .login-button {
     margin-top: 16px;
-    padding: 11px 14px;
-    color: #fff;
-    font-weight: 650;
-    background: #175cd3;
-    border: 0;
-    border-radius: 9px;
-    cursor: pointer;
-}
-
-.login-button:hover:not(:disabled) {
-    background: #1849a9;
-}
-
-.login-button:disabled {
-    cursor: wait;
-    opacity: 0.65;
 }
 </style>

@@ -1,19 +1,3 @@
-<script setup lang="ts">
-import { useI18n } from "vue-i18n";
-import useI18nStore from "../store/i18n";
-
-const i18nStore = useI18nStore();
-const { locale } = useI18n();
-
-if (i18nStore.locale !== "") {
-  locale.value = i18nStore.locale;
-}
-
-const updateLocale = (newLocale: string) => {
-  i18nStore.setLocale(newLocale);
-};
-</script>
-
 <template>
   <section class="home-page">
     <div class="home-heading">
@@ -24,7 +8,12 @@ const updateLocale = (newLocale: string) => {
 
     <div class="quick-actions">
       <router-link to="/clip" class="action-card clipboard-card">
-        <span class="action-icon" aria-hidden="true">✎</span>
+        <span class="action-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="5" y="4" width="14" height="17" rx="2" />
+            <path d="M9 4.5V3h6v1.5M8.5 10h7M8.5 14h7M8.5 18h4" />
+          </svg>
+        </span>
         <span class="action-copy">
           <strong>{{ $t("index.clip_channel_title") }}</strong>
           <span>{{ $t("index.clip_description") }}</span>
@@ -33,7 +22,11 @@ const updateLocale = (newLocale: string) => {
       </router-link>
 
       <router-link to="/file" class="action-card upload-card">
-        <span class="action-icon" aria-hidden="true">↑</span>
+        <span class="action-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 15V4m0 0L7 9m5-5 5 5M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4" />
+          </svg>
+        </span>
         <span class="action-copy">
           <strong>{{ $t("index.file_channel_title") }}</strong>
           <span>{{ $t("index.file_description") }}</span>
@@ -44,26 +37,18 @@ const updateLocale = (newLocale: string) => {
 
     <div class="home-footer">
       <router-link to="/filemanage" class="manage-link">{{ $t("index.manage_link") }}</router-link>
-      <label class="locale-control">
-        <span>{{ $t("index.language") }}</span>
-        <select v-model="$i18n.locale" @change="updateLocale($i18n.locale)">
-          <option v-for="availableLocale in $i18n.availableLocales" :key="availableLocale" :value="availableLocale">
-            {{ availableLocale }}
-          </option>
-        </select>
-      </label>
     </div>
   </section>
 </template>
 
 <style scoped>
 .home-page {
-  max-width: 700px;
-  margin: 42px auto 0;
+  max-width: 760px;
+  margin: 12px auto 0;
 }
 
 .home-heading {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .eyebrow {
@@ -91,20 +76,20 @@ h1 {
 .quick-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .action-card {
   display: flex;
-  min-height: 150px;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 22px;
+  min-height: 136px;
+  align-items: center;
+  gap: 15px;
+  padding: 20px;
   color: #172033;
   text-decoration: none;
   background: #fff;
   border: 1px solid #e4e8ee;
-  border-radius: 16px;
+  border-radius: 14px;
   box-shadow: 0 4px 18px #3440540a;
   transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
@@ -115,6 +100,22 @@ h1 {
   box-shadow: 0 10px 24px #34405414;
 }
 
+.action-card:focus-visible {
+  outline: 3px solid #84adff;
+  outline-offset: 3px;
+}
+
+.clipboard-card {
+  color: #fff;
+  background: #175cd3;
+  border-color: #175cd3;
+}
+
+.clipboard-card:hover {
+  background: #1849a9;
+  border-color: #1849a9;
+}
+
 .action-icon {
   display: grid;
   width: 42px;
@@ -123,9 +124,18 @@ h1 {
   place-items: center;
   color: #175cd3;
   font-size: 24px;
-  font-weight: 700;
   background: #eff6ff;
   border-radius: 12px;
+}
+
+.action-icon svg {
+  width: 23px;
+  height: 23px;
+}
+
+.clipboard-card .action-icon {
+  color: #fff;
+  background: #ffffff24;
 }
 
 .action-copy {
@@ -146,17 +156,24 @@ h1 {
   line-height: 1.5;
 }
 
+.clipboard-card .action-copy span {
+  color: #dbeafe;
+}
+
 .action-arrow {
   color: #98a2b3;
   font-size: 19px;
 }
 
+.clipboard-card .action-arrow {
+  color: #bfdbfe;
+}
+
 .home-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 22px;
+  justify-content: flex-end;
+  margin-top: 18px;
 }
 
 .manage-link {
@@ -170,25 +187,9 @@ h1 {
   text-decoration: underline;
 }
 
-.locale-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #667085;
-  font-size: 13px;
-}
-
-.locale-control select {
-  padding: 5px 8px;
-  color: #344054;
-  background: #fff;
-  border: 1px solid #d0d5dd;
-  border-radius: 7px;
-}
-
 @media (max-width: 560px) {
   .home-page {
-    margin-top: 18px;
+    margin-top: 4px;
   }
 
   .quick-actions {
@@ -196,8 +197,8 @@ h1 {
   }
 
   .action-card {
-    min-height: 128px;
-    padding: 18px;
+    min-height: 116px;
+    padding: 17px;
   }
 }
 </style>
