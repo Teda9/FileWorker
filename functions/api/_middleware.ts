@@ -1,3 +1,5 @@
+import "../utils/xml-parser-polyfill";
+
 import Env from "../utils/Env";
 import { auth } from "../utils/utils";
 

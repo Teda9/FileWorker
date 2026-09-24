@@ -21,6 +21,7 @@
     "@codemirror/lang-css": "^6.2.1",
     "@types/toastify-js": "^1.12.3",
     "@unocss/reset": "^0.58.5",
+    "@xmldom/xmldom": "^0.9.12",
     "axios": "^1.6.8",
     "codemirror": "^6.0.1",
     "cookie": "^0.7.2",
