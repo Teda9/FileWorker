@@ -1,6 +1,5 @@
 import { GetObjectCommand, CopyObjectCommand, DeleteObjectCommand, GetObjectCommandOutput } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import mime from 'mime/lite';
 
 import Env from './utils/Env';
@@ -38,7 +37,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
     headers.set('etag', response.ETag);
 
-    if (headers.get("x-store-visibility") !== "public" && !auth(env, context.request)) {
+    if (headers.get("x-store-visibility") !== "public" && !(await auth(env, context.request))) {
         return new Response("Not found", { status: 404 });
     }
     return new Response(
@@ -51,7 +50,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
 export const onRequestPut: PagesFunction<Env> = async (context) => {
     const { params, env, request } = context;
-    if (!auth(env, request)) {
+    if (!(await auth(env, request))) {
         return new Response("Unauthorized", { status: 401 });
     }
     const { filename } = params;
@@ -77,7 +76,7 @@ export const onRequestPut: PagesFunction<Env> = async (context) => {
 
 export const onRequestPatch: PagesFunction<Env> = async (context) => {
     const { params, env, request } = context;
-    if (!auth(env, request)) {
+    if (!(await auth(env, request))) {
         return new Response("Unauthorized", { status: 401 });
     }
     const { filename } = params;
@@ -103,7 +102,7 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
 
 export const onRequestDelete: PagesFunction<Env> = async (context) => {
     const { params, env, request } = context;
-    if (!auth(env, request)) {
+    if (!(await auth(env, request))) {
         return new Response("Unauthorized", { status: 401 });
     }
     const { filename } = params;
@@ -113,14 +112,7 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
         Bucket: BUCKET!,
         Key: filename as string
     });
-    const url = await getSignedUrl(
-        s3,
-        command,
-        { expiresIn: 3600 }
-    );
-    await fetch(url, {
-        method: 'DELETE',
-    });
+    await s3.send(command);
     return new Response("OK", { status: 200 });
 }
 

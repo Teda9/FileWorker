@@ -5,13 +5,14 @@ const errorHandling: PagesFunction<Env> = async (context) => {
   try {
     return await context.next();
   } catch (err) {
-    return new Response(`${err.message}\n${err.stack}`, { status: 500 });
+    console.error(err);
+    return new Response("Internal Server Error", { status: 500 });
   }
 }
 
 const authentication: PagesFunction<Env> = async (context) => {
   const { env, request } = context;
-  if (!auth(env, request)) {
+  if (!(await auth(env, request))) {
     return new Response("Unauthorized", { status: 401 });
   }
   return await context.next();

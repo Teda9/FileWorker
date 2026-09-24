@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const PutFile = async (filename: string, file: File | string, visibility: string, type: string = "file") => {
-    const url = `/${filename}`;
+    const url = `/${encodeURIComponent(filename)}`;
     const headers = {
         'x-store-visibility': visibility,
         'x-store-type': type,
@@ -11,7 +11,7 @@ const PutFile = async (filename: string, file: File | string, visibility: string
 }
 
 const PatchFile = async (filename: string, visibility?: string) => {
-    const url = `/${filename}`;
+    const url = `/${encodeURIComponent(filename)}`;
     const headers: { [key: string]: any } = {};
     if (visibility) {
         headers['x-store-visibility'] = visibility;
@@ -21,7 +21,7 @@ const PatchFile = async (filename: string, visibility?: string) => {
 }
 
 const DeleteFile = async (filename: string) => {
-    const url = `/${filename}`;
+    const url = `/${encodeURIComponent(filename)}`;
     const response = await axios.delete(url);
     return response.data;
 }

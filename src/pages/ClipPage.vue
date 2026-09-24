@@ -1,196 +1,309 @@
 <script setup lang="ts">
-import { minimalSetup } from "codemirror"
-import { EditorState } from "@codemirror/state"
-import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor } from "@codemirror/view"
-
+import { minimalSetup } from "codemirror";
+import { EditorState } from "@codemirror/state";
+import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor } from "@codemirror/view";
 import { onMounted, onBeforeUnmount, ref } from "vue";
 import useClipStore from "@/store/clip";
-
 import { PutFile } from "@/api";
 import { getRandomFilename } from "@/utils/utils";
 
 const code = ref("");
-const modified = ref(false);
-const editorElement = ref();
-let editor: EditorView;
+const saveStatus = ref<'unsaved' | 'saving' | 'saved' | 'failed'>('unsaved');
+const editorElement = ref<HTMLElement>();
+const filename = ref(getRandomFilename());
+const savedUrl = ref('');
+let editor: EditorView | undefined;
 
-let startState = EditorState.create({
+const startState = EditorState.create({
   doc: "",
   extensions: [
     minimalSetup,
     lineNumbers(),
     highlightSpecialChars(),
     drawSelection(),
-    // 文件拖动
     dropCursor(),
     EditorView.updateListener.of((update) => {
       code.value = update.state.doc.toString();
       if (update.docChanged) {
-        modified.value = true;
+        saveStatus.value = 'unsaved';
+        savedUrl.value = '';
       }
     }),
   ]
-})
+});
 
 onMounted(() => {
   editor = new EditorView({
     state: startState,
-    parent: editorElement.value,
-  })
-  editor.requestMeasure({
-    read: () => {
-      editor.focus();
-    }
-  })
-})
-
-let filename = ref(getRandomFilename());
-
-let refreshRandomFileName = () => {
-  filename.value = getRandomFilename();
-}
+    parent: editorElement.value!,
+  });
+  editor.focus();
+});
 
 const clipStore = useClipStore();
 
-let onSaveBtnClick = async () => {
-  await PutFile(filename.value, code.value, clipStore.visibility, "text");
-  modified.value = false;
-}
+const refreshRandomFileName = () => {
+  filename.value = getRandomFilename();
+  saveStatus.value = 'unsaved';
+  savedUrl.value = '';
+};
 
-let saveContentKeydown = (e: KeyboardEvent) => {
-  if ((e.ctrlKey && e.key === "s") || (e.metaKey && e.key === "s")) {
-    e.preventDefault();
-    onSaveBtnClick();
-  }
-}
+const onSaveBtnClick = async () => {
+  if (saveStatus.value === 'saving') return;
 
-let onPasteFile = async (e: ClipboardEvent) => {
-  if (!e.clipboardData?.files.length) {
-    return;
+  saveStatus.value = 'saving';
+  try {
+    await PutFile(filename.value, code.value, clipStore.visibility, "text");
+    saveStatus.value = 'saved';
+    savedUrl.value = `/${encodeURIComponent(filename.value)}`;
+  } catch {
+    saveStatus.value = 'failed';
   }
-  const file = e.clipboardData.files[0];
-  console.log(file);
+};
+
+const saveContentKeydown = (event: KeyboardEvent) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    void onSaveBtnClick();
+  }
+};
+
+const onPasteFile = async (event: ClipboardEvent) => {
+  const file = event.clipboardData?.files[0];
+  if (!file || !editor) return;
+
   const text = await file.text();
   const cursor = editor.state.selection.main.head;
-  editor.dispatch({
-    changes: { from: cursor, insert: text },
-  });
-}
-
+  editor.dispatch({ changes: { from: cursor, insert: text } });
+};
 
 onMounted(() => {
   window.addEventListener("keydown", saveContentKeydown);
   document.addEventListener("paste", onPasteFile);
-})
+});
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", saveContentKeydown);
   document.removeEventListener("paste", onPasteFile);
-})
-
+  editor?.destroy();
+});
 </script>
 
 <template>
-  <div class="flex flex-col items-center">
-    <div class="text-area flex flex-col mt-4">
-      <div class="header p-2 flex flex-row items-center">
-        <input class="filename-input monospace" type="text" v-model="filename" :placeholder="$t('common.filename')" />
-        <button @click="refreshRandomFileName" class="i-mdi-refresh ml-1 w-5 h-5"></button>
-        <div :class="modified ? 'unsave-attention' : 'save-attention'"></div>
+  <section class="clip-page">
+    <div class="clip-heading">
+      <div>
+        <h1>{{ $t('page_title.clip') }}</h1>
+        <p>{{ $t('index.clip_description') }}</p>
       </div>
-      <div ref="editorElement"></div>
-      <div class="footer p-2">
-        <select class="public-select" v-model="clipStore.visibility">
+      <a v-if="savedUrl" class="open-saved" :href="savedUrl" target="_blank" rel="noopener">
+        {{ $t('clip.open_saved') }} ↗
+      </a>
+    </div>
+
+    <div class="text-area">
+      <div class="editor-header">
+        <input
+          v-model="filename"
+          class="filename-input monospace"
+          type="text"
+          :placeholder="$t('common.filename')"
+          :aria-label="$t('common.filename')"
+          @input="saveStatus = 'unsaved'; savedUrl = ''"
+        />
+        <button class="filename-refresh" type="button" :aria-label="$t('clip.new_name')" @click="refreshRandomFileName">
+          ↻
+        </button>
+        <span class="save-status" :class="`status-${saveStatus}`" role="status">
+          {{ $t(`clip.status_${saveStatus}`) }}
+        </span>
+      </div>
+      <div ref="editorElement" class="editor-host"></div>
+      <div class="editor-footer">
+        <select
+          v-model="clipStore.visibility"
+          class="public-select"
+          :aria-label="$t('common.public')"
+          @change="saveStatus = 'unsaved'; savedUrl = ''"
+        >
           <option value="private">{{ $t('common.private') }}</option>
           <option value="public">{{ $t('common.public') }}</option>
         </select>
-        <button class="save-btn" @click="onSaveBtnClick">{{ $t('common.save') }}</button>
+        <button class="save-btn" type="button" :disabled="saveStatus === 'saving'" @click="onSaveBtnClick">
+          {{ saveStatus === 'saving' ? $t('common.saving') : $t('common.save') }}
+        </button>
       </div>
     </div>
-  </div>
+  </section>
 </template>
 
-<style>
-html,
-body,
-#app {
+<style scoped>
+.clip-page {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.clip-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+h1 {
   margin: 0;
-  padding: 0;
-  background-color: #f8f9fa;
+  color: #172033;
+  font-size: 24px;
+  letter-spacing: -0.03em;
 }
 
-.pannel {
-  --uno: my-6 px-4 py-4 max-w-screen-md w-4/5 rounded shadow-md;
+.clip-heading p {
+  margin: 6px 0 0;
+  color: #667085;
+  font-size: 14px;
 }
 
-.tips-pannel {
-  background-color: #d1e7dd;
+.open-saved {
+  flex: 0 0 auto;
+  color: #175cd3;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.open-saved:hover {
+  text-decoration: underline;
 }
 
 .text-area {
-  --uno: rounded max-w-screen-md w-4/5 border-1 border-gray-300;
-  background-color: white;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e4e8ee;
+  border-radius: 13px;
+  box-shadow: 0 4px 18px #3440540a;
 }
 
-.text-area .header {
-  background-color: #f5f5f5;
+.editor-header,
+.editor-footer {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #fbfcfd;
 }
 
-.text-area .footer {
-  --uno: flex flex-row;
-  background-color: #f5f5f5;
+.editor-header {
+  border-bottom: 1px solid #eaecf0;
 }
 
-.text-area .footer .public-select {
-  --uno: border-1 rounded px-6 py-1.5 text-sm;
-  border-color: #d1d1d1;
-  outline-color: #0969da;
-}
-
-.text-area .footer .save-btn {
-  --uno: rounded px-6 py-1.5 text-sm ml-auto text-white;
-  background-color: #1f883d;
-}
-
-.text-area .footer .save-btn:hover {
-  background-color: #1a7f37;
-}
-
-.text-area .header .filename-input {
-  --uno: border-1 rounded px-3 py-2 text-sm w-60;
-  border-color: #d1d1d1;
-  outline-color: #0969da;
-}
-
-.cm-editor {
-  height: 400px;
-  border-top: 1px solid #ddd;
-  border-bottom: 1px solid #ddd;
-}
-
-.cm-editor.cm-focused {
+.filename-input {
+  width: min(60%, 320px);
+  min-width: 0;
+  padding: 8px 10px;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
   outline: none;
 }
 
-.cm-gutter.cm-lineNumbers {
-  background-color: white;
+.filename-input:focus,
+.public-select:focus {
+  border-color: #84adff;
+  box-shadow: 0 0 0 3px #2e90fa1f;
 }
 
-.cm-gutters {
-  border: none !important;
+.filename-refresh {
+  width: 34px;
+  height: 34px;
+  color: #475467;
+  font-size: 21px;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  cursor: pointer;
 }
 
-.cm-selectionBackground {
-  background-color: #54aeff66 !important;
+.save-status {
+  margin-left: auto;
+  color: #667085;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
-.unsave-attention {
-  --uno: i-mdi-circle-small w-8 h-8 ml-auto;
-  color: #9a6700 !important;
+.status-saved {
+  color: #067647;
 }
 
-.save-attention {
-  --uno: i-mdi-circle-small w-8 h-8 ml-auto;
-  color: #1f883d !important;
+.status-failed {
+  color: #b42318;
+}
+
+.status-unsaved {
+  color: #b54708;
+}
+
+.editor-host :deep(.cm-editor) {
+  min-height: 280px;
+  height: min(58vh, 480px);
+  border: 0;
+}
+
+.editor-host :deep(.cm-editor.cm-focused) {
+  outline: none;
+}
+
+.editor-host :deep(.cm-gutters) {
+  border: 0;
+  background: #fff;
+}
+
+.editor-footer {
+  border-top: 1px solid #eaecf0;
+}
+
+.public-select {
+  padding: 8px 10px;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+}
+
+.save-btn {
+  margin-left: auto;
+  padding: 9px 17px;
+  color: #fff;
+  font-weight: 650;
+  background: #175cd3;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.save-btn:hover:not(:disabled) {
+  background: #1849a9;
+}
+
+.save-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+@media (max-width: 520px) {
+  .clip-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .editor-header,
+  .editor-footer {
+    padding: 9px;
+  }
+
+  .save-status {
+    font-size: 12px;
+  }
 }
 </style>

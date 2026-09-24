@@ -61,28 +61,39 @@ const isEqual = (a: string, b: string) => {
     return crypto.subtle.timingSafeEqual(encodedA, encodedB);
 }
 
-const auth = (env: Env, request: Request) => {
+const auth = async (env: Env, request: Request): Promise<boolean> => {
     const { PASSWORD } = env;
-    // cookie PASSWORD
-    const cookie = parse(request.headers.get('Cookie') ?? '');
-    if (isEqual(cookie['PASSWORD'] ?? "", PASSWORD ?? "")) {
-        return true;
-    }
-    // query HMAC
-    const url = new URL(request.url);
-    const path = url.pathname + url.search;
-    const path_without_sign = path.replace(/&sign=[^&]+/, '');
-    const sign = url.searchParams.get('sign');
-    if (sign === null) return false;
-    if (!hmacVerify(path_without_sign, PASSWORD, sign)) {
+    if (!PASSWORD) {
         return false;
     }
-    const expire = url.searchParams.get('expire');
-    if (expire === null) return false;
-    if (Date.now() < parseInt(expire)) {
+
+    // cookie PASSWORD
+    const cookie = parse(request.headers.get('Cookie') ?? '');
+    if (isEqual(cookie['PASSWORD'] ?? "", PASSWORD)) {
         return true;
     }
-    return false;
+
+    // query HMAC
+    const url = new URL(request.url);
+    const sign = url.searchParams.get('sign');
+    if (sign === null) return false;
+
+    const expire = url.searchParams.get('expire');
+    if (expire === null) return false;
+
+    const expiresAt = Number(expire);
+    if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
+        return false;
+    }
+
+    const unsignedParams = new URLSearchParams(url.searchParams);
+    unsignedParams.delete('sign');
+    const unsignedPath = `${url.pathname}?${unsignedParams.toString()}`;
+    try {
+        return await hmacVerify(unsignedPath, PASSWORD, sign);
+    } catch {
+        return false;
+    }
 };
 
 const sign = async (path: string, key: string) => {

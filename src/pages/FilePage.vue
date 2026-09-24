@@ -1,201 +1,315 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, type Ref } from 'vue';
+import { reactive, ref } from 'vue';
 import useFileStore from '@/store/file';
 import { formatBytes } from '@/utils/utils';
 import { PutFile } from '@/api';
 
 const fileStore = useFileStore();
-
-let fileUploadInput = ref();
-
-let requestUploadFile = () => {
-  fileUploadInput.value.click();
-}
+const fileUploadInput = ref<HTMLInputElement>();
+const isDragging = ref(false);
 
 interface UploadedFile {
+  id: number;
   name: string;
   size: number;
   visibility: string;
-  done: boolean;
+  status: 'uploading' | 'done' | 'failed';
 }
 
-let uploadedFiles: Ref<UploadedFile[]> = ref([]);
+const uploadedFiles = ref<UploadedFile[]>([]);
+let nextUploadId = 0;
 
-const uploadSingle = async (index: number, filename: string, file: File) => {
-  await PutFile(filename, file, fileStore.visibility, "file");
-  uploadedFiles.value[index - 1].done = true;
-}
+const openPicker = () => fileUploadInput.value?.click();
 
-onMounted(() => {
-  fileUploadInput.value.addEventListener('change', async (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const { files } = target;
-    if (files && files.length > 0) {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const index = uploadedFiles.value.push({
-          name: file.name,
-          size: file.size,
-          visibility: fileStore.visibility,
-          done: false
-        });
-        try {
-          uploadSingle(index, file.name, file);
-        } catch (error) {
-          console.error(error);
-        }
-      }
-    }
+const uploadFiles = async (files: FileList | File[]) => {
+  const visibility = fileStore.visibility;
+  const selectedFiles = Array.from(files);
+  const queue = selectedFiles.map((file) => {
+    const item = reactive<UploadedFile>({
+      id: nextUploadId++,
+      name: file.name,
+      size: file.size,
+      visibility,
+      status: 'uploading',
+    });
+    return { item, file };
   });
-});
 
-let fileUploadArea = ref();
+  uploadedFiles.value = [...queue.map(({ item }) => item), ...uploadedFiles.value];
 
-const onDragEvent = async (event: DragEvent) => {
-  event.preventDefault();
-  event.stopPropagation();
-  if (event.type === 'dragover') {
-    fileUploadArea.value.style.border = '2px dashed #000';
-  } else {
-    fileUploadArea.value.style.border = '2px dashed #e5e7eb';
-  }
-  if (event.type === 'drop') {
-    const files = event.dataTransfer?.files;
-    if (files && files.length > 0) {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const index = uploadedFiles.value.push({
-          name: file.name,
-          size: file.size,
-          visibility: fileStore.visibility,
-          done: false
-        });
-        try {
-          uploadSingle(index, file.name, file);
-        } catch (error) {
-          console.error(error);
-        }
-      }
+  await Promise.all(queue.map(async ({ item, file }) => {
+    try {
+      await PutFile(file.name, file, visibility, "file");
+      item.status = 'done';
+    } catch {
+      item.status = 'failed';
     }
-  }
-}
-onMounted(() => {
-  fileUploadArea.value.addEventListener('dragenter', onDragEvent);
-  fileUploadArea.value.addEventListener('dragover', onDragEvent);
-  fileUploadArea.value.addEventListener('dragleave', onDragEvent);
-  fileUploadArea.value.addEventListener('drop', onDragEvent);
-});
-onUnmounted(() => {
-  fileUploadArea.value.removeEventListener('dragenter', onDragEvent);
-  fileUploadArea.value.removeEventListener('dragover', onDragEvent);
-  fileUploadArea.value.removeEventListener('dragleave', onDragEvent);
-  fileUploadArea.value.removeEventListener('drop', onDragEvent);
-});
+  }));
+};
 
+const onFilesSelected = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  if (input.files?.length) {
+    void uploadFiles(input.files);
+    input.value = '';
+  }
+};
+
+const onDrop = (event: DragEvent) => {
+  event.preventDefault();
+  isDragging.value = false;
+  if (event.dataTransfer?.files.length) {
+    void uploadFiles(event.dataTransfer.files);
+  }
+};
 </script>
 
 <template>
-  <div class="flex flex-col items-center">
-    <div class="file-area flex flex-col mt-4">
-      <div class="files" @click="requestUploadFile" ref="fileUploadArea">
-        <input ref="fileUploadInput" type="file" class="hidden" multiple />
-      </div>
-      <div class="footer p-2">
-        <select class="public-select" v-model="fileStore.visibility">
+  <section class="file-page">
+    <div class="page-heading">
+      <h1>{{ $t('page_title.file') }}</h1>
+      <p>{{ $t('index.file_description') }}</p>
+    </div>
+
+    <div class="file-area">
+      <input ref="fileUploadInput" type="file" class="visually-hidden" multiple @change="onFilesSelected" />
+      <button
+        class="drop-zone"
+        :class="{ 'is-dragging': isDragging }"
+        type="button"
+        @click="openPicker"
+        @dragover.prevent="isDragging = true"
+        @dragleave.prevent="isDragging = false"
+        @drop="onDrop"
+      >
+        <span class="upload-icon" aria-hidden="true">↑</span>
+        <strong>{{ $t('file.drop_title') }}</strong>
+        <span>{{ $t('file.drop_hint') }}</span>
+      </button>
+
+      <div class="upload-footer">
+        <label for="visibility-select">{{ $t('file.visibility') }}</label>
+        <select id="visibility-select" v-model="fileStore.visibility" class="public-select">
           <option value="private">{{ $t('common.private') }}</option>
           <option value="public">{{ $t('common.public') }}</option>
         </select>
       </div>
     </div>
-    <div class="px-4 py-4 max-w-screen-md w-4/5">
-      <a v-for="file in uploadedFiles" :key="file.name" class="w-full flex flex-row items-center mt-4"
-        :href="`/${file.name}`" target="_blank">
-        <div class="w-10 h-10 i-mdi-file-document-outline"></div>
-        <div class="flex flex-col">
-          <div class="text-lg font-semibold">{{ file.name }}</div>
-          <div class="text-sm text-gray">{{ formatBytes(file.size) }} {{ file.visibility }}</div>
+
+    <section v-if="uploadedFiles.length" class="upload-queue" aria-live="polite">
+      <h2>{{ $t('file.upload_list') }}</h2>
+      <article v-for="file in uploadedFiles" :key="file.id" class="upload-row">
+        <div class="file-details">
+          <strong :title="file.name">{{ file.name }}</strong>
+          <span>{{ formatBytes(file.size) }} · {{ $t(`file.${file.status === 'done' ? 'uploaded' : file.status}`) }}</span>
         </div>
-        <div class="ml-auto w-6 h-6" :class="file.done ? 'i-mdi-check' : 'uploading'"></div>
-      </a>
-    </div>
-  </div>
+        <a
+          v-if="file.status === 'done'"
+          class="open-file"
+          :href="`/${encodeURIComponent(file.name)}`"
+          target="_blank"
+          rel="noopener"
+        >
+          {{ $t('file.open_file') }} ↗
+        </a>
+        <span v-else-if="file.status === 'uploading'" class="status-spinner" aria-hidden="true"></span>
+        <span v-else class="failed-mark" :aria-label="$t('file.failed')">!</span>
+      </article>
+    </section>
+  </section>
 </template>
 
-<style>
-html,
-body,
-#app {
+<style scoped>
+.file-page {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.page-heading {
+  margin-bottom: 16px;
+}
+
+h1 {
   margin: 0;
-  padding: 0;
-  background-color: #f8f9fa;
+  color: #172033;
+  font-size: 24px;
+  letter-spacing: -0.03em;
 }
 
-.pannel {
-  --uno: my-6 px-4 py-4 max-w-screen-md w-4/5 rounded shadow-md;
-}
-
-.tips-pannel {
-  background-color: #d1e7dd;
+.page-heading p {
+  margin: 6px 0 0;
+  color: #667085;
+  font-size: 14px;
 }
 
 .file-area {
-  --uno: rounded max-w-screen-md w-4/5 border-1 border-gray-300;
-  background-color: white;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e4e8ee;
+  border-radius: 13px;
+  box-shadow: 0 4px 18px #3440540a;
 }
 
-.file-area .header {
-  background-color: #f5f5f5;
+.drop-zone {
+  display: flex;
+  width: 100%;
+  min-height: 230px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 9px;
+  padding: 28px 18px;
+  color: #344054;
+  background: #fff;
+  border: 0;
+  cursor: pointer;
 }
 
-.file-area .footer {
-  --uno: flex flex-row;
-  background-color: #f5f5f5;
+.drop-zone:hover,
+.drop-zone.is-dragging {
+  background: #f5f9ff;
 }
 
-.file-area .footer .public-select {
-  --uno: border-1 rounded px-6 py-1.5 text-sm;
-  border-color: #d1d1d1;
-  outline-color: #0969da;
+.drop-zone.is-dragging {
+  outline: 2px dashed #528bff;
+  outline-offset: -10px;
 }
 
-.file-area .footer .save-btn {
-  --uno: rounded px-6 py-1.5 text-sm ml-auto text-white;
-  background-color: #1f883d;
+.upload-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  color: #175cd3;
+  font-size: 27px;
+  font-weight: 700;
+  background: #eff6ff;
+  border-radius: 14px;
 }
 
-.file-area .footer .save-btn:hover {
-  background-color: #1a7f37;
+.drop-zone strong {
+  margin-top: 4px;
+  font-size: 16px;
 }
 
-.file-area .header .filename-input {
-  --uno: border-1 rounded px-3 py-2 text-sm w-60;
-  border-color: #d1d1d1;
-  outline-color: #0969da;
+.drop-zone > span:last-child {
+  color: #667085;
+  font-size: 13px;
 }
 
-.files {
-  --uno: h-50 border-dashed border-2 cursor-pointer;
-  background: url(../assets/upload.svg) center center no-repeat;
-  background-color: white;
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.upload-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  color: #667085;
+  background: #fbfcfd;
+  border-top: 1px solid #eaecf0;
+  font-size: 13px;
+}
+
+.public-select {
+  padding: 7px 9px;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+}
+
+.upload-queue {
+  margin-top: 24px;
+}
+
+.upload-queue h2 {
+  margin: 0 0 10px;
+  color: #344054;
+  font-size: 15px;
+}
+
+.upload-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #eaecf0;
+  border-bottom: 0;
+}
+
+.upload-row:first-of-type {
+  border-radius: 10px 10px 0 0;
+}
+
+.upload-row:last-child {
+  border-bottom: 1px solid #eaecf0;
+  border-radius: 0 0 10px 10px;
+}
+
+.file-details {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-details strong {
+  overflow: hidden;
+  color: #344054;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-details span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.open-file {
+  flex: 0 0 auto;
+  color: #175cd3;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.open-file:hover {
+  text-decoration: underline;
+}
+
+.status-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #d0d5dd;
+  border-top-color: #175cd3;
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+.failed-mark {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  color: #b42318;
+  font-weight: 700;
+  background: #fef3f2;
+  border-radius: 50%;
 }
 
 @keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-.uploading {
-  border: 5px solid #f3f3f3;
-  border-top: 5px solid #555;
-  border-radius: 50%;
-  width: 50px;
-  height: 50px;
-  display: inline-block;
-  animation: spin 2s linear infinite;
+  to { transform: rotate(360deg); }
 }
 </style>
