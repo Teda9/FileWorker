@@ -42,6 +42,16 @@ const routes = [
             title: $t("page_title.filemanage"),
         },
         component: FileManagePage,
+        props: { kind: "file" },
+    },
+    {
+        path: "/clipmanage",
+        name: "clipmanage",
+        meta: {
+            title: $t("page_title.clipmanage"),
+        },
+        component: FileManagePage,
+        props: { kind: "text" },
     },
     {
         path: "/login",

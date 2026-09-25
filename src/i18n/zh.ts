@@ -22,6 +22,7 @@ export default {
         clip: '剪贴板',
         upload: '上传',
         files: '文件管理',
+        clipmanage: '剪贴板管理',
     },
     index: {
         file_channel_title: '文件',
@@ -40,7 +41,7 @@ export default {
         edit_load_failed: '无法加载这段内容，请刷新后重试。',
         edit_text_only: '这个文件不是可直接编辑的 UTF-8 文本。',
         edit_too_large: '文件超过 2 MB，暂不支持在这里编辑。',
-        back_to_files: '返回文件管理',
+        back_to_files: '返回剪贴板管理',
         status_unsaved: '未保存',
         status_saving: '保存中…',
         status_saved: '已保存',
@@ -64,9 +65,15 @@ export default {
         open_file: '打开',
     },
     filemanage: {
-        title: '已保存的文件',
-        subtitle: '已存入 R2 桶中的文件和剪贴板内容。',
-        empty: '这里还没有文件。上传一个文件或保存一段剪贴板内容后，它会显示在这里。',
+        title: '文件管理',
+        subtitle: '管理上传保存的文件。',
+        empty: '这里还没有文件。上传文件后会显示在这里。',
+        tabs_label: '内容管理',
+        page_size: '每页显示',
+        pagination: '列表分页',
+        page_number: '第 {page} 页 · {count} 项',
+        previous: '上一页',
+        next: '下一页',
         link_label: '访问链接',
         load_failed: '暂时无法加载文件列表，请刷新重试。',
         delete_failed: '删除失败，请重试。',
@@ -78,6 +85,11 @@ export default {
         rename_failed: '重命名失败，请重试。',
         renamed: '文件名已修改。',
         confirm_delete: '确定删除“{filename}”吗？',
+    },
+    clipmanage: {
+        title: '剪贴板管理',
+        subtitle: '管理保存的文字内容。',
+        empty: '这里还没有剪贴板内容。保存一段文字后会显示在这里。',
     },
     login: {
         login_title: '登录以继续',
@@ -93,5 +105,6 @@ export default {
         file: '文件',
         login: '登录',
         filemanage: '文件管理',
+        clipmanage: '剪贴板管理',
     }
 }

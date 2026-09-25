@@ -175,7 +175,7 @@ onBeforeUnmount(() => {
 
     <p v-if="loadError" class="load-error" role="alert">
       {{ loadError }}
-      <router-link to="/filemanage">{{ $t('clip.back_to_files') }}</router-link>
+      <router-link to="/clipmanage">{{ $t('clip.back_to_files') }}</router-link>
     </p>
 
     <div class="text-area">

@@ -1,17 +1,40 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { formatBytes } from '@/utils/utils';
-import { DeleteFile, ListFiles, RenameFile } from '@/api';
+import { DeleteFile, ListStoredItems, RenameFile } from '@/api';
+import type { StoredContentType } from '@/api/list';
 import type { _Object } from '@aws-sdk/client-s3';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 
+const props = defineProps<{ kind: StoredContentType }>();
 const { t: $t } = useI18n();
 const router = useRouter();
+const isClipboard = computed(() => props.kind === 'text');
+const titleKey = computed(() => isClipboard.value ? 'clipmanage' : 'filemanage');
+const pageSizeOptions = [20, 50, 100, 200, 500] as const;
+const pageSizeStorageKey = 'fileworker.manage-page-size';
+
+const readPageSize = () => {
+    try {
+        const saved = Number(localStorage.getItem(pageSizeStorageKey));
+        if (pageSizeOptions.includes(saved as typeof pageSizeOptions[number])) return saved;
+    } catch {
+        // Use the default when browser storage is unavailable.
+    }
+    return 20;
+};
+
+const pageSize = ref(readPageSize());
 const uploadedFiles = ref<_Object[]>([]);
 const isLoading = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
+const currentPage = ref(0);
+const pageCursors = ref<Array<string | undefined>>([undefined]);
+const nextStartAfter = ref<string>();
+const hasNextPage = ref(false);
+let activeRequest = 0;
 
 const displayFilename = (key?: string) => {
     if (!key) return '';
@@ -26,24 +49,66 @@ const fileHref = (key?: string) => `/${encodeURIComponent(displayFilename(key))}
 const fileUrl = (key?: string) => new URL(fileHref(key), window.location.origin).href;
 const readableFileUrl = (key?: string) => `${window.location.host}/${displayFilename(key)}`;
 
+const resetPagination = () => {
+    currentPage.value = 0;
+    pageCursors.value = [undefined];
+    nextStartAfter.value = undefined;
+    hasNextPage.value = false;
+};
+
 const refreshFiles = async () => {
-    if (isLoading.value) return;
+    const requestId = ++activeRequest;
+    const requestKind = props.kind;
+    const cursor = pageCursors.value[currentPage.value];
     isLoading.value = true;
     errorMessage.value = '';
     successMessage.value = '';
     try {
-        const res = await ListFiles();
-        uploadedFiles.value = res.Contents ?? [];
+        const response = await ListStoredItems(requestKind, pageSize.value, cursor);
+        if (requestId !== activeRequest) return;
+        uploadedFiles.value = response.Contents ?? [];
+        nextStartAfter.value = response.NextStartAfter;
+        hasNextPage.value = response.IsTruncated;
     } catch {
-        errorMessage.value = $t('filemanage.load_failed');
+        if (requestId === activeRequest) {
+            errorMessage.value = $t('filemanage.load_failed');
+        }
     } finally {
-        isLoading.value = false;
+        if (requestId === activeRequest) isLoading.value = false;
     }
 };
 
 onMounted(() => {
     void refreshFiles();
 });
+
+watch(() => props.kind, () => {
+    resetPagination();
+    void refreshFiles();
+});
+
+watch(pageSize, (size) => {
+    try {
+        localStorage.setItem(pageSizeStorageKey, String(size));
+    } catch {
+        // Keep the selection for this page even when it cannot be persisted.
+    }
+    resetPagination();
+    void refreshFiles();
+});
+
+const onPreviousPageClick = async () => {
+    if (currentPage.value === 0 || isLoading.value) return;
+    currentPage.value -= 1;
+    await refreshFiles();
+};
+
+const onNextPageClick = async () => {
+    if (!hasNextPage.value || !nextStartAfter.value || isLoading.value) return;
+    currentPage.value += 1;
+    pageCursors.value[currentPage.value] = nextStartAfter.value;
+    await refreshFiles();
+};
 
 const onDeleteFileClick = async (key?: string) => {
     if (!key || !window.confirm($t('filemanage.confirm_delete', { filename: displayFilename(key) }))) return;
@@ -52,6 +117,10 @@ const onDeleteFileClick = async (key?: string) => {
     try {
         await DeleteFile(displayFilename(key));
         await refreshFiles();
+        if (!uploadedFiles.value.length && currentPage.value > 0) {
+            currentPage.value -= 1;
+            await refreshFiles();
+        }
     } catch {
         errorMessage.value = $t('filemanage.delete_failed');
     }
@@ -70,7 +139,7 @@ const onCopyLinkClick = async (key?: string) => {
 };
 
 const onEditFileClick = async (key?: string) => {
-    if (!key) return;
+    if (!key || !isClipboard.value) return;
     errorMessage.value = '';
     successMessage.value = '';
     await router.push({ path: '/clip', query: { edit: displayFilename(key) } });
@@ -110,14 +179,27 @@ const closeMenuAnd = (event: MouseEvent, action: () => unknown) => {
 
 <template>
     <section class="file-manage-page">
+        <nav class="manage-tabs" :aria-label="$t('filemanage.tabs_label')">
+            <router-link to="/filemanage">{{ $t('nav.files') }}</router-link>
+            <router-link to="/clipmanage">{{ $t('nav.clipmanage') }}</router-link>
+        </nav>
+
         <div class="page-heading">
             <div>
-                <h1>{{ $t('filemanage.title') }}</h1>
-                <p>{{ $t('filemanage.subtitle') }}</p>
+                <h1>{{ $t(`${titleKey}.title`) }}</h1>
+                <p>{{ $t(`${titleKey}.subtitle`) }}</p>
             </div>
-            <button class="ui-button refresh-button" type="button" :disabled="isLoading" @click="refreshFiles">
-                {{ isLoading ? $t('common.loading') : $t('common.refresh') }}
-            </button>
+            <div class="page-controls">
+                <label class="page-size-control">
+                    <span>{{ $t('filemanage.page_size') }}</span>
+                    <select v-model.number="pageSize" :disabled="isLoading">
+                        <option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option>
+                    </select>
+                </label>
+                <button class="ui-button refresh-button" type="button" :disabled="isLoading" @click="refreshFiles">
+                    {{ isLoading ? $t('common.loading') : $t('common.refresh') }}
+                </button>
+            </div>
         </div>
 
         <p v-if="errorMessage" class="error-message" role="alert">{{ errorMessage }}</p>
@@ -127,8 +209,10 @@ const closeMenuAnd = (event: MouseEvent, action: () => unknown) => {
         </div>
         <div v-else-if="!errorMessage && !uploadedFiles.length" class="empty-state">
             <span class="empty-icon" aria-hidden="true">□</span>
-            <p>{{ $t('filemanage.empty') }}</p>
-            <router-link to="/file" class="upload-link">{{ $t('nav.upload') }} ↗</router-link>
+            <p>{{ $t(`${titleKey}.empty`) }}</p>
+            <router-link :to="isClipboard ? '/clip' : '/file'" class="upload-link">
+                {{ isClipboard ? $t('nav.clip') : $t('nav.upload') }} ↗
+            </router-link>
         </div>
 
         <div v-if="uploadedFiles.length" class="file-list">
@@ -169,7 +253,7 @@ const closeMenuAnd = (event: MouseEvent, action: () => unknown) => {
                             {{ $t('common.more') }} <span aria-hidden="true">⌄</span>
                         </summary>
                         <div class="more-menu">
-                            <button class="more-item" type="button" @click="closeMenuAnd($event, () => onEditFileClick(file.Key))">
+                            <button v-if="isClipboard" class="more-item" type="button" @click="closeMenuAnd($event, () => onEditFileClick(file.Key))">
                                 {{ $t('common.edit') }}
                             </button>
                             <button class="more-item" type="button" @click="closeMenuAnd($event, () => onRenameFileClick(file.Key))">
@@ -187,6 +271,16 @@ const closeMenuAnd = (event: MouseEvent, action: () => unknown) => {
                 </div>
             </article>
         </div>
+
+        <nav v-if="currentPage > 0 || hasNextPage" class="pagination" :aria-label="$t('filemanage.pagination')">
+            <button class="ui-button" type="button" :disabled="currentPage === 0 || isLoading" @click="onPreviousPageClick">
+                {{ $t('filemanage.previous') }}
+            </button>
+            <span>{{ $t('filemanage.page_number', { page: currentPage + 1, count: uploadedFiles.length }) }}</span>
+            <button class="ui-button" type="button" :disabled="!hasNextPage || isLoading" @click="onNextPageClick">
+                {{ $t('filemanage.next') }}
+            </button>
+        </nav>
     </section>
 </template>
 
@@ -194,6 +288,29 @@ const closeMenuAnd = (event: MouseEvent, action: () => unknown) => {
 .file-manage-page {
     max-width: 760px;
     margin: 0 auto;
+}
+
+.manage-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 22px;
+    padding: 4px;
+    background: #eaecf0;
+    border-radius: 10px;
+}
+
+.manage-tabs a {
+    padding: 8px 14px;
+    color: #667085;
+    font-size: 13px;
+    text-decoration: none;
+    border-radius: 7px;
+}
+
+.manage-tabs a.router-link-active {
+    color: #175cd3;
+    background: #fff;
+    box-shadow: 0 1px 2px #1018281a;
 }
 
 h1 {
@@ -211,6 +328,31 @@ h1 {
 
 .refresh-button {
     flex: 0 0 auto;
+}
+
+.page-controls {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.page-size-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: #667085;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.page-size-control select {
+    min-height: 36px;
+    padding: 6px 9px;
+    color: #344054;
+    background: #fff;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
 }
 
 .empty-state {
@@ -358,6 +500,16 @@ h1 {
     gap: 7px;
 }
 
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 14px;
+    color: #667085;
+    font-size: 13px;
+}
+
 .file-actions .ui-button {
     min-height: 34px;
     padding: 7px 10px;
@@ -421,6 +573,15 @@ h1 {
 }
 
 @media (max-width: 520px) {
+    .manage-tabs {
+        margin-bottom: 18px;
+    }
+
+    .page-controls {
+        width: 100%;
+        justify-content: space-between;
+    }
+
     .page-heading p {
         max-width: 240px;
     }

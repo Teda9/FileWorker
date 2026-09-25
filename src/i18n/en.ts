@@ -22,6 +22,7 @@ export default {
         clip: 'Clipboard',
         upload: 'Upload',
         files: 'Files',
+        clipmanage: 'Clipboard manager',
     },
     index: {
         file_channel_title: 'Files',
@@ -40,7 +41,7 @@ export default {
         edit_load_failed: 'Could not load this content. Refresh and try again.',
         edit_text_only: 'This file is not editable UTF-8 text.',
         edit_too_large: 'This file is over 2 MB and cannot be edited here.',
-        back_to_files: 'Back to file manager',
+        back_to_files: 'Back to clipboard manager',
         status_unsaved: 'Not saved',
         status_saving: 'Saving…',
         status_saved: 'Saved',
@@ -64,9 +65,15 @@ export default {
         open_file: 'Open',
     },
     filemanage: {
-        title: 'Saved files',
-        subtitle: 'Files and clipboard notes stored in your R2 bucket.',
-        empty: 'No files yet. Upload a file or save clipboard text and it will appear here.',
+        title: 'File manager',
+        subtitle: 'Manage files you have uploaded.',
+        empty: 'No files yet. Uploaded files will appear here.',
+        tabs_label: 'Content management',
+        page_size: 'Items per page',
+        pagination: 'List pagination',
+        page_number: 'Page {page} · {count} items',
+        previous: 'Previous',
+        next: 'Next',
         link_label: 'Link',
         load_failed: 'Could not load your files. Refresh and try again.',
         delete_failed: 'Could not delete this file. Please try again.',
@@ -78,6 +85,11 @@ export default {
         rename_failed: 'Could not rename the file. Please try again.',
         renamed: 'Filename updated.',
         confirm_delete: 'Delete “{filename}”?',
+    },
+    clipmanage: {
+        title: 'Clipboard manager',
+        subtitle: 'Manage saved text content.',
+        empty: 'No clipboard content yet. Saved text will appear here.',
     },
     login: {
         login_title: 'Login to continue',
@@ -93,5 +105,6 @@ export default {
         file: 'Files',
         login: 'Login',
         filemanage: 'Files',
+        clipmanage: 'Clipboard manager',
     }
 }
