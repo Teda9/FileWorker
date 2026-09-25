@@ -68,7 +68,6 @@ export default {
         title: '文件管理',
         subtitle: '管理上传保存的文件。',
         empty: '这里还没有文件。上传文件后会显示在这里。',
-        tabs_label: '内容管理',
         page_size: '每页显示',
         pagination: '列表分页',
         page_number: '第 {page} 页 · {count} 项',

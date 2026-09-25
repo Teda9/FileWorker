@@ -179,11 +179,6 @@ const closeMenuAnd = (event: MouseEvent, action: () => unknown) => {
 
 <template>
     <section class="file-manage-page">
-        <nav class="manage-tabs" :aria-label="$t('filemanage.tabs_label')">
-            <router-link to="/filemanage">{{ $t('nav.files') }}</router-link>
-            <router-link to="/clipmanage">{{ $t('nav.clipmanage') }}</router-link>
-        </nav>
-
         <div class="page-heading">
             <div>
                 <h1>{{ $t(`${titleKey}.title`) }}</h1>
@@ -288,29 +283,6 @@ const closeMenuAnd = (event: MouseEvent, action: () => unknown) => {
 .file-manage-page {
     max-width: 760px;
     margin: 0 auto;
-}
-
-.manage-tabs {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 22px;
-    padding: 4px;
-    background: #eaecf0;
-    border-radius: 10px;
-}
-
-.manage-tabs a {
-    padding: 8px 14px;
-    color: #667085;
-    font-size: 13px;
-    text-decoration: none;
-    border-radius: 7px;
-}
-
-.manage-tabs a.router-link-active {
-    color: #175cd3;
-    background: #fff;
-    box-shadow: 0 1px 2px #1018281a;
 }
 
 h1 {
@@ -573,10 +545,6 @@ h1 {
 }
 
 @media (max-width: 520px) {
-    .manage-tabs {
-        margin-bottom: 18px;
-    }
-
     .page-controls {
         width: 100%;
         justify-content: space-between;

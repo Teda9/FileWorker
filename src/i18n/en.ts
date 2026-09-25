@@ -68,7 +68,6 @@ export default {
         title: 'File manager',
         subtitle: 'Manage files you have uploaded.',
         empty: 'No files yet. Uploaded files will appear here.',
-        tabs_label: 'Content management',
         page_size: 'Items per page',
         pagination: 'List pagination',
         page_number: 'Page {page} · {count} items',

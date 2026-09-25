@@ -36,6 +36,7 @@ const selectedLocale = computed({
           <router-link to="/clip" class="nav-link">{{ $t('nav.clip') }}</router-link>
           <router-link to="/file" class="nav-link">{{ $t('nav.upload') }}</router-link>
           <router-link to="/filemanage" class="nav-link">{{ $t('nav.files') }}</router-link>
+          <router-link to="/clipmanage" class="nav-link">{{ $t('nav.clipmanage') }}</router-link>
         </nav>
         <label class="locale-control">
           <span class="visually-hidden">{{ $t('index.language') }}</span>
@@ -255,6 +256,7 @@ select {
   .main-nav {
     flex: 1;
     justify-content: flex-start;
+    flex-wrap: wrap;
     gap: 2px;
   }
 
