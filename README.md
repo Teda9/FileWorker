@@ -107,16 +107,13 @@ npm run dev
 
 ## 界面截图
 
-![FileWorker 首页](README/index.png)
+<img width="1031" height="518" alt="image" src="https://github.com/user-attachments/assets/73cd69ae-a608-49ae-919d-649ec6cecbba" />
 
-![在线剪贴板](README/clip.png)
+<img width="975" height="846" alt="image" src="https://github.com/user-attachments/assets/3a48a02b-7c4f-4d98-ab2c-72ce3612fd5d" />
 
-![文件上传](README/file.png)
+<img width="1026" height="538" alt="image" src="https://github.com/user-attachments/assets/a39f65ab-c8a3-48cc-92e5-106d905c9da6" />
 
-![文件与剪贴板管理](README/manage.png)
+<img width="1012" height="328" alt="image" src="https://github.com/user-attachments/assets/b7f1118d-6071-4109-a0e8-7d7fe5b21687" />
 
-## 赞助
+<img width="1000" height="328" alt="image" src="https://github.com/user-attachments/assets/3396d05b-6f32-4370-8fce-4e1eef483c4b" />
 
-本项目的 CDN 加速与安全防护由 [Tencent EdgeOne](https://edgeone.ai/?from=github) 赞助。
-
-![EdgeOne](https://edgeone.ai/media/34fe3a45-492d-4ea4-ae5d-ea1087ca7b4b.png)
