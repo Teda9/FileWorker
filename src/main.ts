@@ -16,3 +16,11 @@ app.use(router);
 app.use(i18n);
 app.use(pinia);
 app.mount("#app");
+
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error: unknown) => {
+      console.error('Service worker registration failed', error);
+    });
+  });
+}

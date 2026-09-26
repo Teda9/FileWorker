@@ -1,12 +1,12 @@
 import { createRouter, createWebHashHistory } from "vue-router";
-import Cookies from 'js-cookie'
 import i18n from "./i18n";
 
 import IndexPage from "./pages/IndexPage.vue";
-import ClipPage from "./pages/ClipPage.vue";
-import FilePage from "./pages/FilePage.vue";
-import LoginPage from "./pages/LoginPage.vue";
-import FileManagePage from "./pages/FileManagePage.vue";
+
+const ClipPage = () => import("./pages/ClipPage.vue");
+const FilePage = () => import("./pages/FilePage.vue");
+const LoginPage = () => import("./pages/LoginPage.vue");
+const FileManagePage = () => import("./pages/FileManagePage.vue");
 
 const $t = i18n.global.t;
 
@@ -68,18 +68,18 @@ const router = createRouter({
     routes,
 });
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to) => {
     if (to.meta.title) {
         document.title = to.meta.title as string;
     }
-    const PASSWORD = Cookies.get('PASSWORD');
-    if (!PASSWORD && to.path !== '/login') {
-        next({
-            path: '/login',
-        })
-    } else {
-        next()
+    if (to.path === '/login') return true;
+    try {
+        const response = await fetch('/api/auth', { cache: 'no-store' });
+        if (response.ok) return true;
+    } catch {
+        // The login page can show a connection error when authentication is retried.
     }
+    return { path: '/login', query: { redirect: to.fullPath } };
 })
 
 export default router;

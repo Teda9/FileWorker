@@ -4,15 +4,12 @@ import { ref } from 'vue'
 const useFileStore = defineStore(
     'file',
     () => {
-        const visibility = ref("public");
+        const visibility = ref("private");
         function setVisibility(newVisibility: string) {
             visibility.value = newVisibility
         }
 
         return { visibility, setVisibility }
-    },
-    {
-        persist: true,
     }
 )
 

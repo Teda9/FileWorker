@@ -8,3 +8,4 @@ init();
 
 export * from './file';
 export * from './list';
+export * from './recent';

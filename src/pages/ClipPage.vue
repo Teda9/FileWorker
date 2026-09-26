@@ -1,15 +1,22 @@
 <script setup lang="ts">
 import { minimalSetup } from "codemirror";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, lineNumbers, highlightSpecialChars, drawSelection, dropCursor } from "@codemirror/view";
-import { onMounted, onBeforeUnmount, ref } from "vue";
+import { StreamLanguage } from '@codemirror/language';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import useClipStore from "@/store/clip";
 import { GetFile, HeadFile, PutFile } from "@/api";
 import { getRandomFilename } from "@/utils/utils";
+import { clearClipDraft, guessClipMode, readClipDraft, writeClipDraft, type ClipDraft, type ClipMode } from '@/utils/clipDraft';
 import { useRoute } from "vue-router";
+import { useRouter } from "vue-router";
+import { takeSharedPayload } from '@/pwa/share-target';
+import { composeSharedContent } from '@/utils/clipShare';
+import { getApiErrorCode } from '@/utils/apiErrors';
 import { useI18n } from "vue-i18n";
 
 const route = useRoute();
+const router = useRouter();
 const { t: $t } = useI18n();
 const editTarget = typeof route.query.edit === 'string' ? route.query.edit : '';
 const isEditingExisting = Boolean(editTarget);
@@ -18,14 +25,105 @@ const saveStatus = ref<'unsaved' | 'saving' | 'saved' | 'failed'>('unsaved');
 const isLoadingExisting = ref(false);
 const isLoadedExisting = ref(!isEditingExisting);
 const loadError = ref('');
+const saveError = ref('');
 const editorElement = ref<HTMLElement>();
 const filename = ref(editTarget || getRandomFilename());
 const savedUrl = ref('');
 const storeType = ref('text');
+const mode = ref<ClipMode>(guessClipMode(filename.value));
+const activeView = ref<'edit' | 'preview'>('edit');
+const draftNotice = ref<'restored' | 'unavailable' | ''>('');
+const jsonError = ref('');
+const language = new Compartment();
+const editorEditable = new Compartment();
+const markdownRenderer = shallowRef<{ render: (source: string) => string }>();
+const markdownPreview = computed(() => markdownRenderer.value?.render(code.value) ?? '');
 let editor: EditorView | undefined;
 let isLoadingContent = false;
+const isSaving = ref(false);
+let hasEdited = false;
+let modeWasChosen = false;
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
 const clipStore = useClipStore();
 const MAX_EDIT_BYTES = 2 * 1024 * 1024;
+
+const languageForMode = async (value: ClipMode): Promise<Extension> => {
+  switch (value) {
+    case 'markdown': return (await import('@codemirror/lang-markdown')).markdown();
+    case 'json': return (await import('@codemirror/lang-json')).json();
+    case 'shell': {
+      const shellModule = await import('@codemirror/legacy-modes/mode/shell');
+      return StreamLanguage.define(shellModule.shell);
+    }
+    case 'yaml': return (await import('@codemirror/lang-yaml')).yaml();
+    case 'javascript': return (await import('@codemirror/lang-javascript')).javascript();
+    case 'python': return (await import('@codemirror/lang-python')).python();
+    default: return [];
+  }
+};
+
+let languageLoadId = 0;
+const updateLanguage = async (value: ClipMode) => {
+  mode.value = value;
+  const loadId = ++languageLoadId;
+  const extension = await languageForMode(value);
+  if (loadId === languageLoadId) editor?.dispatch({ effects: language.reconfigure(extension) });
+};
+
+watch(mode, async (value) => {
+  if (value !== 'markdown' || markdownRenderer.value) return;
+  const { default: MarkdownIt } = await import('markdown-it');
+  const renderer = new MarkdownIt({ html: false, linkify: false, breaks: true });
+  renderer.disable('image');
+  markdownRenderer.value = renderer;
+}, { immediate: true });
+
+const persistDraft = () => {
+  if (draftTimer) clearTimeout(draftTimer);
+  draftTimer = undefined;
+  if (!hasEdited || saveStatus.value === 'saved' || !isLoadedExisting.value) return;
+  const draft: ClipDraft = {
+    content: code.value,
+    filename: filename.value,
+    visibility: clipStore.visibility === 'public' ? 'public' : 'private',
+    mode: mode.value,
+    savedAt: Date.now(),
+  };
+  if (!writeClipDraft(editTarget, draft)) draftNotice.value = 'unavailable';
+};
+
+const scheduleDraft = () => {
+  if (draftTimer) clearTimeout(draftTimer);
+  draftTimer = setTimeout(persistDraft, 400);
+};
+
+const markUnsaved = () => {
+  hasEdited = true;
+  saveStatus.value = 'unsaved';
+  saveError.value = '';
+  savedUrl.value = '';
+  scheduleDraft();
+};
+
+const setEditorContent = (content: string) => {
+  isLoadingContent = true;
+  editor?.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: content } });
+  isLoadingContent = false;
+  code.value = content;
+};
+
+const restoreDraft = (draft: ClipDraft) => {
+  filename.value = isEditingExisting ? editTarget : draft.filename;
+  clipStore.visibility = draft.visibility;
+  mode.value = draft.mode;
+  modeWasChosen = true;
+  void updateLanguage(mode.value);
+  setEditorContent(draft.content);
+  hasEdited = true;
+  saveStatus.value = 'unsaved';
+  savedUrl.value = '';
+  draftNotice.value = 'restored';
+};
 
 const startState = EditorState.create({
   doc: "",
@@ -35,11 +133,13 @@ const startState = EditorState.create({
     highlightSpecialChars(),
     drawSelection(),
     dropCursor(),
+    language.of([]),
+    editorEditable.of(EditorView.editable.of(!isEditingExisting)),
     EditorView.updateListener.of((update) => {
       code.value = update.state.doc.toString();
       if (update.docChanged && !isLoadingContent) {
-        saveStatus.value = 'unsaved';
-        savedUrl.value = '';
+        jsonError.value = '';
+        markUnsaved();
       }
     }),
   ]
@@ -86,14 +186,18 @@ const loadExistingContent = async () => {
     }
     storeType.value = response.headers['x-store-type'] || 'file';
     isLoadedExisting.value = true;
-    code.value = content;
-    isLoadingContent = true;
-    editor?.dispatch({
-      changes: { from: 0, to: editor.state.doc.length, insert: content },
-    });
-    isLoadingContent = false;
+    editor?.dispatch({ effects: editorEditable.reconfigure(EditorView.editable.of(true)) });
+    setEditorContent(content);
     saveStatus.value = 'saved';
     savedUrl.value = `/${encodeURIComponent(editTarget)}`;
+    const draft = readClipDraft(editTarget);
+    if (draft) {
+      if (draft.content === content && draft.visibility === clipStore.visibility) {
+        clearClipDraft(editTarget);
+      } else {
+        restoreDraft(draft);
+      }
+    }
   } catch {
     loadError.value = $t('clip.edit_load_failed');
     saveStatus.value = 'failed';
@@ -103,33 +207,113 @@ const loadExistingContent = async () => {
 };
 
 onMounted(async () => {
+  if (!isEditingExisting) clipStore.visibility = 'private';
   editor = new EditorView({
     state: startState,
     parent: editorElement.value!,
   });
   if (isEditingExisting) {
     await loadExistingContent();
+  } else {
+    const draft = readClipDraft('');
+    if (draft) restoreDraft(draft);
+    const shareId = typeof route.query.share === 'string' ? route.query.share : '';
+    if (shareId) {
+      try {
+        const shared = await takeSharedPayload(shareId);
+        if (!shared) {
+          loadError.value = $t('clip.share_unavailable');
+        } else {
+          const content = composeSharedContent(shared);
+          if (content) {
+            setEditorContent(content);
+            hasEdited = true;
+            saveStatus.value = 'unsaved';
+            draftNotice.value = '';
+            modeWasChosen = false;
+            updateLanguage(guessClipMode(filename.value));
+          }
+        }
+      } catch {
+        loadError.value = $t('clip.share_unavailable');
+      } finally {
+        const query = { ...route.query };
+        delete query.share;
+        await router.replace({ path: route.path, query });
+      }
+    }
   }
-  editor.focus();
+  if (activeView.value === 'edit') editor.focus();
 });
 
 const refreshRandomFileName = () => {
   if (isEditingExisting) return;
   filename.value = getRandomFilename();
-  saveStatus.value = 'unsaved';
-  savedUrl.value = '';
+  if (!modeWasChosen) updateLanguage(guessClipMode(filename.value));
+  markUnsaved();
+};
+
+const onFilenameInput = () => {
+  if (!modeWasChosen) updateLanguage(guessClipMode(filename.value));
+  markUnsaved();
+};
+
+const onModeChange = () => {
+  modeWasChosen = true;
+  updateLanguage(mode.value);
+  if (saveStatus.value !== 'saved') scheduleDraft();
+};
+
+const switchView = async (value: 'edit' | 'preview') => {
+  activeView.value = value;
+  if (value === 'edit') {
+    await nextTick();
+    editor?.requestMeasure();
+    editor?.focus();
+  }
+};
+
+const formatJson = () => {
+  try {
+    const formatted = JSON.stringify(JSON.parse(code.value), null, 2);
+    setEditorContent(formatted);
+    jsonError.value = '';
+    markUnsaved();
+    editor?.focus();
+  } catch {
+    jsonError.value = $t('clip.json_invalid');
+  }
 };
 
 const onSaveBtnClick = async () => {
-  if (saveStatus.value === 'saving' || isLoadingExisting.value || !isLoadedExisting.value) return;
+  if (isSaving.value || isLoadingExisting.value || !isLoadedExisting.value) return;
 
+  const savedContent = code.value;
+  const savedFilename = filename.value;
+  const savedVisibility = clipStore.visibility;
+  isSaving.value = true;
   saveStatus.value = 'saving';
+  saveError.value = '';
   try {
-    await PutFile(filename.value, code.value, clipStore.visibility, storeType.value);
-    saveStatus.value = 'saved';
-    savedUrl.value = `/${encodeURIComponent(filename.value)}`;
-  } catch {
+    await PutFile(savedFilename, savedContent, savedVisibility, storeType.value);
+    if (code.value === savedContent && filename.value === savedFilename && clipStore.visibility === savedVisibility) {
+      saveStatus.value = 'saved';
+      hasEdited = false;
+      savedUrl.value = `/${encodeURIComponent(savedFilename)}`;
+      draftNotice.value = '';
+      if (draftTimer) clearTimeout(draftTimer);
+      draftTimer = undefined;
+      clearClipDraft(editTarget);
+    } else {
+      markUnsaved();
+    }
+  } catch (error) {
     saveStatus.value = 'failed';
+    const code = getApiErrorCode(error);
+    saveError.value = code ? $t(`api_error.${code}`) : $t('clip.status_failed');
+    persistDraft();
+  } finally {
+    isSaving.value = false;
   }
 };
 
@@ -142,7 +326,7 @@ const saveContentKeydown = (event: KeyboardEvent) => {
 
 const onPasteFile = async (event: ClipboardEvent) => {
   const file = event.clipboardData?.files[0];
-  if (!file || !editor) return;
+  if (!file || !editor || activeView.value !== 'edit') return;
 
   const text = await file.text();
   const cursor = editor.state.selection.main.head;
@@ -152,11 +336,15 @@ const onPasteFile = async (event: ClipboardEvent) => {
 onMounted(() => {
   window.addEventListener("keydown", saveContentKeydown);
   document.addEventListener("paste", onPasteFile);
+  window.addEventListener('beforeunload', persistDraft);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", saveContentKeydown);
   document.removeEventListener("paste", onPasteFile);
+  window.removeEventListener('beforeunload', persistDraft);
+  if (draftTimer) clearTimeout(draftTimer);
+  persistDraft();
   editor?.destroy();
 });
 </script>
@@ -187,7 +375,7 @@ onBeforeUnmount(() => {
           :placeholder="$t('common.filename')"
           :aria-label="$t('common.filename')"
           :disabled="isEditingExisting"
-          @input="saveStatus = 'unsaved'; savedUrl = ''"
+          @input="onFilenameInput"
         />
         <button v-if="!isEditingExisting" class="filename-refresh" type="button" :aria-label="$t('clip.new_name')" @click="refreshRandomFileName">
           ↻
@@ -196,18 +384,53 @@ onBeforeUnmount(() => {
           {{ isLoadingExisting ? $t('common.loading') : $t(`clip.status_${saveStatus}`) }}
         </span>
       </div>
-      <div ref="editorElement" class="editor-host"></div>
+      <div class="editor-tools">
+        <label class="mode-label" for="clip-mode">{{ $t('clip.mode') }}</label>
+        <select id="clip-mode" v-model="mode" class="mode-select" :disabled="isEditingExisting && !isLoadedExisting" @change="onModeChange">
+          <option value="text">{{ $t('clip.mode_text') }}</option>
+          <option value="markdown">{{ $t('clip.mode_markdown') }}</option>
+          <option value="json">{{ $t('clip.mode_json') }}</option>
+          <option value="shell">{{ $t('clip.mode_shell') }}</option>
+          <option value="yaml">{{ $t('clip.mode_yaml') }}</option>
+          <option value="javascript">{{ $t('clip.mode_javascript') }}</option>
+          <option value="python">{{ $t('clip.mode_python') }}</option>
+        </select>
+        <button v-if="mode === 'json' && activeView === 'edit'" class="tool-button format-button" type="button" :disabled="!isLoadedExisting" @click="formatJson">
+          {{ $t('clip.format_json') }}
+        </button>
+        <div class="view-switch" :aria-label="$t('clip.view')">
+          <button class="view-button" :class="{ active: activeView === 'edit' }" type="button" :aria-pressed="activeView === 'edit'" @click="switchView('edit')">
+            {{ $t('clip.edit_view') }}
+          </button>
+          <button class="view-button" :class="{ active: activeView === 'preview' }" type="button" :aria-pressed="activeView === 'preview'" @click="switchView('preview')">
+            {{ $t('clip.preview_view') }}
+          </button>
+        </div>
+      </div>
+      <p v-if="draftNotice" class="editor-notice" :class="{ 'notice-error': draftNotice === 'unavailable' }" role="status">
+        {{ $t(draftNotice === 'restored' ? 'clip.draft_restored' : 'clip.draft_unavailable') }}
+      </p>
+      <p v-if="jsonError" class="editor-notice notice-error" role="alert">{{ jsonError }}</p>
+      <p v-if="saveError" class="editor-notice notice-error" role="alert">{{ saveError }}</p>
+      <div v-show="activeView === 'edit'" ref="editorElement" class="editor-host"></div>
+      <div v-if="activeView === 'preview'" class="preview-host">
+        <p v-if="!code" class="preview-empty">{{ $t('clip.preview_empty') }}</p>
+        <div v-else-if="mode === 'markdown'" class="markdown-preview" v-html="markdownPreview"></div>
+        <pre v-else class="text-preview">{{ code }}</pre>
+      </div>
       <div class="editor-footer">
+        <span class="visibility-hint">{{ $t(clipStore.visibility === 'public' ? 'common.visibility_public_hint' : 'common.visibility_private_hint') }}</span>
         <select
           v-model="clipStore.visibility"
           class="public-select"
           :aria-label="$t('common.public')"
-          @change="saveStatus = 'unsaved'; savedUrl = ''"
+          :disabled="isEditingExisting && !isLoadedExisting"
+          @change="markUnsaved"
         >
           <option value="private">{{ $t('common.private') }}</option>
           <option value="public">{{ $t('common.public') }}</option>
         </select>
-        <button class="ui-button ui-button--primary save-btn" type="button" :disabled="saveStatus === 'saving' || isLoadingExisting || !isLoadedExisting" @click="onSaveBtnClick">
+        <button class="ui-button ui-button--primary save-btn" type="button" :disabled="isSaving || isLoadingExisting || !isLoadedExisting" @click="onSaveBtnClick">
           {{ saveStatus === 'saving' ? $t('common.saving') : $t('common.save') }}
         </button>
       </div>
@@ -260,8 +483,86 @@ h1 {
   background: #fbfcfd;
 }
 
+.visibility-hint {
+  flex: 1;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .editor-header {
   border-bottom: 1px solid #eaecf0;
+}
+
+.editor-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.mode-label {
+  color: #667085;
+  font-size: 13px;
+}
+
+.mode-select,
+.tool-button {
+  min-height: 34px;
+  padding: 6px 10px;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+}
+
+.tool-button,
+.view-button {
+  cursor: pointer;
+}
+
+.tool-button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.view-switch {
+  display: flex;
+  margin-left: auto;
+  padding: 3px;
+  background: #f2f4f7;
+  border-radius: 8px;
+}
+
+.view-button {
+  min-height: 28px;
+  padding: 4px 10px;
+  color: #667085;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.view-button.active {
+  color: #344054;
+  background: #fff;
+  box-shadow: 0 1px 3px #10182818;
+}
+
+.editor-notice {
+  margin: 0;
+  padding: 8px 14px;
+  color: #175cd3;
+  background: #eff8ff;
+  font-size: 13px;
+}
+
+.notice-error {
+  color: #b42318;
+  background: #fef3f2;
 }
 
 .filename-input {
@@ -338,6 +639,56 @@ h1 {
   background: #fff;
 }
 
+.preview-host {
+  min-height: 280px;
+  height: min(58vh, 480px);
+  overflow: auto;
+  padding: 16px 20px;
+  color: #344054;
+}
+
+.preview-empty {
+  color: #98a2b3;
+}
+
+.text-preview {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.markdown-preview {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.markdown-preview :deep(:first-child) {
+  margin-top: 0;
+}
+
+.markdown-preview :deep(pre) {
+  overflow-x: auto;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+
+.markdown-preview :deep(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.markdown-preview :deep(blockquote) {
+  margin-left: 0;
+  padding-left: 14px;
+  border-left: 3px solid #d0d5dd;
+  color: #667085;
+}
+
+.markdown-preview :deep(a) {
+  color: #175cd3;
+}
+
 .editor-footer {
   border-top: 1px solid #eaecf0;
 }
@@ -361,8 +712,17 @@ h1 {
   }
 
   .editor-header,
-  .editor-footer {
+  .editor-footer,
+  .editor-tools {
     padding: 9px;
+  }
+
+  .view-switch {
+    width: 100%;
+  }
+
+  .view-button {
+    flex: 1;
   }
 
   .save-status {

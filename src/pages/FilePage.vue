@@ -1,30 +1,92 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import useFileStore from '@/store/file';
 import { formatBytes } from '@/utils/utils';
 import { HeadFile, PutFile } from '@/api';
 import { useI18n } from 'vue-i18n';
+import { useRoute } from 'vue-router';
+import { readSharedPayload, deleteSharedPayload, removeSharedFiles } from '@/pwa/share-target';
+import { getApiErrorCode } from '@/utils/apiErrors';
 
 const { t: $t } = useI18n();
 const fileStore = useFileStore();
+const route = useRoute();
+onMounted(() => {
+  fileStore.visibility = 'private';
+});
 const fileUploadInput = ref<HTMLInputElement>();
 const isDragging = ref(false);
 const isProcessingFiles = ref(false);
 const isCheckingFiles = ref(false);
 const uploadError = ref('');
+const sharedTextId = ref('');
+const sharedTextReady = ref(false);
+const sharedFileCount = ref(0);
 
 interface UploadedFile {
   id: number;
   name: string;
   size: number;
   visibility: string;
-  status: 'uploading' | 'done' | 'failed';
+  status: 'queued' | 'uploading' | 'done' | 'failed';
+  progress?: number;
 }
 
 const uploadedFiles = ref<UploadedFile[]>([]);
+const failedFiles = new Map<number, File>();
+const failedCodes = new Map<number, string>();
 let nextUploadId = 0;
+const UPLOAD_CONCURRENCY = 3;
 
 const openPicker = () => fileUploadInput.value?.click();
+
+const updateUploadError = () => {
+  const failed = uploadedFiles.value.filter(({ status }) => status === 'failed');
+  const names = failed.map(({ name }) => name);
+  const codes = [...new Set(failed.map(file => failedCodes.get(file.id)).filter((code): code is string => Boolean(code)))];
+  const details = codes.map(code => $t(`api_error.${code}`)).join(' ');
+  uploadError.value = names.length
+    ? `${$t('file.upload_failed_names', { filenames: [...new Set(names)].join(', ') })}${details ? ` ${details}` : ''}`
+    : '';
+};
+
+const sendFile = async (item: UploadedFile, file: File) => {
+  item.status = 'uploading';
+  item.progress = 0;
+  try {
+    await PutFile(item.name, file, item.visibility, 'file', (loaded, total) => {
+      if (total && total > 0) item.progress = Math.min(100, Math.round(loaded / total * 100));
+    });
+    item.status = 'done';
+    item.progress = 100;
+    failedFiles.delete(item.id);
+    failedCodes.delete(item.id);
+  } catch (error) {
+    item.status = 'failed';
+    item.progress = undefined;
+    failedFiles.set(item.id, file);
+    const code = getApiErrorCode(error);
+    if (code) failedCodes.set(item.id, code);
+  }
+};
+
+const retryUpload = async (item: UploadedFile) => {
+  if (isProcessingFiles.value || item.status !== 'failed') return;
+  const file = failedFiles.get(item.id);
+  if (!file) return;
+  isProcessingFiles.value = true;
+  try {
+    await sendFile(item, file);
+    updateUploadError();
+    if (sharedTextId.value && sharedFileCount.value) {
+      const sharedRows = uploadedFiles.value.slice(0, sharedFileCount.value);
+      sharedTextReady.value = sharedRows.length === sharedFileCount.value && sharedRows.every(({ status }) => status === 'done');
+      if (sharedTextReady.value) await removeSharedFiles(sharedTextId.value);
+    }
+  } finally {
+    isProcessingFiles.value = false;
+  }
+};
 
 const uploadFiles = async (files: FileList | File[]) => {
   if (isProcessingFiles.value) return;
@@ -44,23 +106,40 @@ const uploadFiles = async (files: FileList | File[]) => {
 
     isCheckingFiles.value = true;
     let existingNames: string[];
+    let clipboardNameConflict = '';
     try {
-      const checks = await Promise.all(selectedFiles.map(async ({ name }) => {
-        try {
-          await HeadFile(name);
-          return name;
-        } catch (error) {
-          const status = (error as { response?: { status?: number } }).response?.status;
-          if (status === 404) return null;
-          throw error;
+      existingNames = [];
+      for (let offset = 0; offset < selectedFiles.length; offset += UPLOAD_CONCURRENCY) {
+        const batch = selectedFiles.slice(offset, offset + UPLOAD_CONCURRENCY);
+        const checks = await Promise.all(batch.map(async ({ name }) => {
+          try {
+            const response = await HeadFile(name);
+            return { name, failed: false, type: response.headers['x-store-type'] };
+          } catch (error) {
+            const status = (error as { response?: { status?: number } }).response?.status;
+            return { name: status === 404 ? null : name, failed: status !== 404, code: getApiErrorCode(error), type: undefined };
+          }
+        }));
+        const failedCheck = checks.find(({ failed }) => failed);
+        if (failedCheck) {
+          uploadError.value = failedCheck.code
+            ? $t(`api_error.${failedCheck.code}`)
+            : $t('file.overwrite_check_failed');
+          return;
         }
-      }));
-      existingNames = [...new Set(checks.filter((name): name is string => name !== null))];
+        clipboardNameConflict ||= checks.find(({ type }) => type === 'text')?.name ?? '';
+        existingNames.push(...checks.map(({ name }) => name).filter((name): name is string => name !== null));
+      }
     } catch {
       uploadError.value = $t('file.overwrite_check_failed');
       return;
     } finally {
       isCheckingFiles.value = false;
+    }
+
+    if (clipboardNameConflict) {
+      uploadError.value = $t('file.name_is_clip', { filename: clipboardNameConflict });
+      return;
     }
 
     if (existingNames.length && !window.confirm($t('file.overwrite_confirm', { filenames: existingNames.join(', ') }))) {
@@ -74,26 +153,21 @@ const uploadFiles = async (files: FileList | File[]) => {
         name: file.name,
         size: file.size,
         visibility,
-        status: 'uploading',
+        status: 'queued',
       });
       return { item, file };
     });
 
     uploadedFiles.value = [...queue.map(({ item }) => item), ...uploadedFiles.value];
 
-    const failedNames: string[] = [];
-    await Promise.all(queue.map(async ({ item, file }) => {
-      try {
-        await PutFile(file.name, file, visibility, "file");
-        item.status = 'done';
-      } catch {
-        item.status = 'failed';
-        failedNames.push(file.name);
+    let nextIndex = 0;
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, async () => {
+      while (nextIndex < queue.length) {
+        const { item, file } = queue[nextIndex++];
+        await sendFile(item, file);
       }
     }));
-    if (failedNames.length) {
-      uploadError.value = $t('file.upload_failed_names', { filenames: [...new Set(failedNames)].join(', ') });
-    }
+    updateUploadError();
   } finally {
     isCheckingFiles.value = false;
     isProcessingFiles.value = false;
@@ -115,6 +189,23 @@ const onDrop = (event: DragEvent) => {
     void uploadFiles(event.dataTransfer.files);
   }
 };
+
+onMounted(async () => {
+  const id = typeof route.query.share === 'string' ? route.query.share : '';
+  if (!id) return;
+  const payload = await readSharedPayload(id);
+  if (!payload) return;
+  if (payload.files.length) await uploadFiles(payload.files);
+  if (payload.text || payload.url) {
+    sharedTextId.value = id;
+    sharedFileCount.value = payload.files.length;
+    const sharedRows = uploadedFiles.value.slice(0, payload.files.length);
+    sharedTextReady.value = payload.files.length === 0 || (sharedRows.length === payload.files.length && sharedRows.every(({ status }) => status === 'done'));
+    if (sharedTextReady.value) await removeSharedFiles(id);
+  } else if (!uploadedFiles.value.some(file => file.status === 'failed')) {
+    await deleteSharedPayload(id);
+  }
+});
 </script>
 
 <template>
@@ -154,9 +245,14 @@ const onDrop = (event: DragEvent) => {
           <option value="public">{{ $t('common.public') }}</option>
         </select>
       </div>
+      <p class="visibility-hint">{{ $t(fileStore.visibility === 'public' ? 'common.visibility_public_hint' : 'common.visibility_private_hint') }}</p>
     </div>
 
     <p v-if="isCheckingFiles" class="upload-feedback" role="status">{{ $t('file.checking') }}</p>
+    <p v-if="sharedTextId && sharedTextReady" class="upload-feedback" role="status">
+      {{ $t('file.shared_text_prompt') }}
+      <router-link :to="{ path: '/clip', query: { share: sharedTextId } }">{{ $t('file.save_shared_text') }}</router-link>
+    </p>
     <p v-if="uploadError" class="upload-error" role="alert">{{ uploadError }}</p>
 
     <section v-if="uploadedFiles.length" class="upload-queue" aria-live="polite">
@@ -164,7 +260,10 @@ const onDrop = (event: DragEvent) => {
       <article v-for="file in uploadedFiles" :key="file.id" class="upload-row">
         <div class="file-details">
           <strong :title="file.name">{{ file.name }}</strong>
-          <span>{{ formatBytes(file.size) }} · {{ $t(`file.${file.status === 'done' ? 'uploaded' : file.status}`) }}</span>
+          <span>
+            {{ formatBytes(file.size) }} · {{ $t(`file.${file.status === 'done' ? 'uploaded' : file.status}`) }}
+            <template v-if="file.status === 'uploading' && file.progress !== undefined"> · {{ file.progress }}%</template>
+          </span>
         </div>
         <a
           v-if="file.status === 'done'"
@@ -176,7 +275,9 @@ const onDrop = (event: DragEvent) => {
           {{ $t('file.open_file') }} ↗
         </a>
         <span v-else-if="file.status === 'uploading'" class="status-spinner" aria-hidden="true"></span>
-        <span v-else class="failed-mark" :aria-label="$t('file.failed')">!</span>
+        <button v-else-if="file.status === 'failed'" class="ui-button" type="button" :disabled="isProcessingFiles" @click="retryUpload(file)">
+          {{ $t('file.retry') }}
+        </button>
       </article>
     </section>
   </section>
@@ -285,6 +386,13 @@ h1 {
   font-size: 13px;
 }
 
+.visibility-hint {
+  margin: 7px 0 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .public-select {
   padding: 7px 9px;
   color: #344054;
@@ -373,17 +481,6 @@ h1 {
   border-top-color: #175cd3;
   border-radius: 50%;
   animation: spin 800ms linear infinite;
-}
-
-.failed-mark {
-  display: grid;
-  width: 21px;
-  height: 21px;
-  place-items: center;
-  color: #b42318;
-  font-weight: 700;
-  background: #fef3f2;
-  border-radius: 50%;
 }
 
 @keyframes spin {

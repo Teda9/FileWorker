@@ -1,12 +1,23 @@
 import axios from 'axios';
 
-const PutFile = async (filename: string, file: File | string, visibility: string, type: string = "file") => {
+const PutFile = async (
+    filename: string,
+    file: File | string,
+    visibility: string,
+    type: string = "file",
+    onProgress?: (loaded: number, total?: number) => void,
+) => {
     const url = `/${encodeURIComponent(filename)}`;
     const headers = {
         'x-store-visibility': visibility,
         'x-store-type': type,
     };
-    const response = await axios.put(url, file, { headers });
+    const response = await axios.put(url, file, {
+        headers,
+        onUploadProgress: onProgress
+            ? (event) => onProgress(event.loaded, event.total)
+            : undefined,
+    });
     return response.data;
 }
 
@@ -41,4 +52,9 @@ const RenameFile = async (sourceKey: string, filename: string) => {
     return response.data;
 }
 
-export { PutFile, PatchFile, DeleteFile, GetFile, HeadFile, RenameFile }
+const CreateShareLink = async (key: string, ttlSeconds: number): Promise<{ url: string; expiresAt: number }> => {
+    const response = await axios.post<{ url: string; expiresAt: number }>('/api/share', { key, ttlSeconds });
+    return response.data;
+}
+
+export { PutFile, PatchFile, DeleteFile, GetFile, HeadFile, RenameFile, CreateShareLink }

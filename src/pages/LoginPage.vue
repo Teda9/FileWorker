@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import Cookies from 'js-cookie';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
 const router = useRouter();
+const route = useRoute();
 const { t: $t } = useI18n();
 
 const password = ref('');
@@ -19,17 +19,14 @@ const onSubmit = async () => {
 
     isSubmitting.value = true;
     loginError.value = '';
-    Cookies.set('PASSWORD', password.value, {
-        path: '/',
-        sameSite: 'lax',
-        secure: window.location.protocol === 'https:',
-        expires: 30,
-    });
-
     try {
-        const response = await fetch('/api/auth', { cache: 'no-store' });
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: password.value }),
+            cache: 'no-store',
+        });
         if (response.status === 401) {
-            Cookies.remove('PASSWORD', { path: '/' });
             loginError.value = $t('login.invalid_password');
             return;
         }
@@ -37,14 +34,15 @@ const onSubmit = async () => {
             throw new Error('Authentication service unavailable');
         }
 
-        const backPath = window.history.state.back;
-        if (typeof backPath === 'string' && backPath !== '/login') {
-            await router.replace(backPath);
-        } else {
-            await router.replace('/');
-        }
+        password.value = '';
+        const redirect = route.query.redirect;
+        const destination = typeof redirect === 'string' &&
+            redirect.startsWith('/') && !redirect.startsWith('//') &&
+            !redirect.startsWith('/login')
+            ? redirect
+            : '/';
+        await router.replace(destination);
     } catch {
-        Cookies.remove('PASSWORD', { path: '/' });
         loginError.value = $t('login.connection_error');
     } finally {
         isSubmitting.value = false;

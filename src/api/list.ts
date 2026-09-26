@@ -13,6 +13,8 @@ export const ListStoredItems = async (
     type: StoredContentType,
     maxKeys: number,
     startAfter?: string,
+    search?: string,
+    signal?: AbortSignal,
 ): Promise<StoredItemsPage> => {
     const contents: _Object[] = [];
     let cursor = startAfter;
@@ -21,11 +23,12 @@ export const ListStoredItems = async (
     while (contents.length < maxKeys) {
         const params = new URLSearchParams({
             Type: type,
-            MaxKeys: String(maxKeys),
+            MaxKeys: String(maxKeys - contents.length),
         });
         if (cursor) params.set('StartAfter', cursor);
+        if (search?.trim()) params.set('Search', search.trim());
 
-        const response = await axios.get<StoredItemsPage>('/api/list', { params });
+        const response = await axios.get<StoredItemsPage>('/api/list', { params, signal });
         const page = response.data;
         contents.push(...(page.Contents ?? []));
         isTruncated = page.IsTruncated;

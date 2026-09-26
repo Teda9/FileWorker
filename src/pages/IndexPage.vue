@@ -1,3 +1,24 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue';
+import { ListRecentItems, type RecentItem } from '@/api/recent';
+import { formatBytes } from '@/utils/utils';
+
+const recentItems = ref<RecentItem[]>([]);
+const recentIncomplete = ref(false);
+const displayName = (key: string) => {
+  if (key.startsWith('files/') || key.startsWith('clips/')) return key.slice(key.indexOf('/') + 1);
+  try { return decodeURIComponent(key); } catch { return key; }
+};
+const itemHref = (key: string) => `/${encodeURIComponent(displayName(key))}`;
+onMounted(async () => {
+  try {
+    const recent = await ListRecentItems();
+    recentItems.value = recent.items;
+    recentIncomplete.value = recent.incomplete;
+  } catch { recentItems.value = []; }
+});
+</script>
+
 <template>
   <section class="home-page">
     <div class="home-heading">
@@ -38,6 +59,17 @@
     <div class="home-footer">
       <router-link to="/filemanage" class="manage-link">{{ $t("index.manage_link") }}</router-link>
     </div>
+
+    <section v-if="recentItems.length || recentIncomplete" class="recent-section">
+      <h2>{{ $t('index.recent_title') }}</h2>
+      <p v-if="recentIncomplete" class="recent-warning" role="status">{{ $t('index.recent_incomplete') }}</p>
+      <ul class="recent-list">
+        <li v-for="item in recentItems" :key="item.Key">
+          <a :href="itemHref(item.Key)">{{ displayName(item.Key) }}</a>
+          <span>{{ formatBytes(item.Size) }}</span>
+        </li>
+      </ul>
+    </section>
   </section>
 </template>
 
@@ -174,6 +206,60 @@ h1 {
   align-items: center;
   justify-content: flex-end;
   margin-top: 18px;
+}
+
+.recent-section {
+  margin-top: 30px;
+}
+
+.recent-section h2 {
+  margin: 0 0 10px;
+  color: #344054;
+  font-size: 16px;
+}
+
+.recent-list {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #e4e8ee;
+  border-radius: 12px;
+}
+
+.recent-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.recent-list li:last-child {
+  border-bottom: 0;
+}
+
+.recent-list a {
+  overflow: hidden;
+  color: #175cd3;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.recent-list span {
+  flex: 0 0 auto;
+  color: #667085;
+  font-size: 12px;
+}
+
+.recent-warning {
+  margin: 0 0 12px;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .manage-link {

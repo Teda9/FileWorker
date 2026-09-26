@@ -1,9 +1,15 @@
 import { S3Client } from "@aws-sdk/client-s3";
-import Env from './Env';
+import type Env from './Env';
 import { parse } from "cookie";
+
+const SESSION_COOKIE = "FW_SESSION";
+const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 function createS3Client(env: Env) {
     const { REGION, ENDPOINT, ACCESS_KEY_ID, SECRET_ACCESS_KEY } = env;
+    if (!ENDPOINT || !ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
+        throw new Error('S3 environment variables are missing');
+    }
     return new S3Client({
         region: REGION ?? "auto",
         endpoint: ENDPOINT,
@@ -13,6 +19,12 @@ function createS3Client(env: Env) {
         },
     });
 }
+
+const signingKey = (env: Env): string => {
+    const key = env.SESSION_SECRET ?? env.SECRET_ACCESS_KEY;
+    if (!key) throw new Error('SESSION_SECRET or SECRET_ACCESS_KEY is required');
+    return key;
+};
 
 const hmacEncode = async (data: string, key: string) => {
     const encoder = new TextEncoder();
@@ -61,20 +73,66 @@ const isEqual = (a: string, b: string) => {
     return crypto.subtle.timingSafeEqual(encodedA, encodedB);
 }
 
+const isPasswordValid = (env: Env, password: string): boolean =>
+    Boolean(env.PASSWORD) && isEqual(password, env.PASSWORD!);
+
+const sessionPayload = (env: Env, expiresAt: number): string =>
+    `session:v1:${env.PASSWORD}:${expiresAt}`;
+
+const createSessionCookie = async (env: Env, request: Request): Promise<string> => {
+    const expiresAt = Date.now() + SESSION_MAX_AGE_SECONDS * 1000;
+    const signature = await hmacEncode(sessionPayload(env, expiresAt), signingKey(env));
+    const token = encodeURIComponent(`${expiresAt}.${signature}`);
+    const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+    return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SECONDS}${secure}`;
+};
+
+const createSignedShareUrl = async (env: Env, request: Request, filename: string, ttlSeconds: number): Promise<string> => {
+    const url = new URL(`/${encodeURIComponent(filename)}`, request.url);
+    url.searchParams.set('expire', String(Date.now() + ttlSeconds * 1000));
+    const unsignedPath = `${url.pathname}?${url.searchParams.toString()}`;
+    url.searchParams.set('sign', await hmacEncode(`share:v1:${unsignedPath}`, signingKey(env)));
+    return url.href;
+};
+
+const hasValidSession = async (env: Env, token?: string): Promise<boolean> => {
+    if (!token) return false;
+    const separator = token.indexOf(".");
+    if (separator < 1) return false;
+    const expiresAt = Number(token.slice(0, separator));
+    if (!Number.isSafeInteger(expiresAt) || Date.now() >= expiresAt) return false;
+    if (expiresAt > Date.now() + SESSION_MAX_AGE_SECONDS * 1000) return false;
+    try {
+        return await hmacVerify(
+            sessionPayload(env, expiresAt),
+            signingKey(env),
+            token.slice(separator + 1),
+        );
+    } catch {
+        return false;
+    }
+};
+
 const auth = async (env: Env, request: Request): Promise<boolean> => {
     const { PASSWORD } = env;
     if (!PASSWORD) {
         return false;
     }
 
-    // cookie PASSWORD
+    if (request.method !== "GET" && request.method !== "HEAD") {
+        const origin = request.headers.get("Origin");
+        if (origin && origin !== new URL(request.url).origin) return false;
+    }
+
     const cookie = parse(request.headers.get('Cookie') ?? '');
-    if (isEqual(cookie['PASSWORD'] ?? "", PASSWORD)) {
+    if (await hasValidSession(env, cookie[SESSION_COOKIE])) {
         return true;
     }
 
-    // query HMAC
+    // Shared links only authorize reading the exact file URL.
+    if (request.method !== "GET" && request.method !== "HEAD") return false;
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) return false;
     const sign = url.searchParams.get('sign');
     if (sign === null) return false;
 
@@ -90,14 +148,10 @@ const auth = async (env: Env, request: Request): Promise<boolean> => {
     unsignedParams.delete('sign');
     const unsignedPath = `${url.pathname}?${unsignedParams.toString()}`;
     try {
-        return await hmacVerify(unsignedPath, PASSWORD, sign);
+        return await hmacVerify(`share:v1:${unsignedPath}`, signingKey(env), sign);
     } catch {
         return false;
     }
 };
 
-const sign = async (path: string, key: string) => {
-    return await hmacEncode(path, key);
-}
-
-export { createS3Client, auth, sign };
+export { createS3Client, auth, createSessionCookie, createSignedShareUrl, isPasswordValid };
