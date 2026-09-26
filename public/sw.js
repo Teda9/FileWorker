@@ -58,8 +58,8 @@ async function serveAppShell(request) {
     if (cached) return cached;
     throw error;
   }
-  if (isStaticResponse(response) &&
-      response.headers.get('content-type')?.includes('text/html')) {
+  const contentType = response.headers.get('content-type') || '';
+  if (isStaticResponse(response) && contentType.indexOf('text/html') !== -1) {
     try {
       const cache = await caches.open(STATIC_CACHE);
       await cache.put('/', response.clone());
@@ -107,7 +107,7 @@ async function receiveShare(request) {
   try {
     const form = await request.formData();
     const files = form.getAll('files').filter((value) => value instanceof File);
-    const id = crypto.randomUUID();
+    const id = createShareId();
     const value = (key) => {
       const item = form.get(key);
       return typeof item === 'string' ? item : '';
@@ -126,6 +126,26 @@ async function receiveShare(request) {
     console.error('Share target failed', error);
     return shareErrorResponse();
   }
+}
+
+function createShareId() {
+  if (self.crypto && typeof self.crypto.randomUUID === 'function') {
+    return self.crypto.randomUUID();
+  }
+
+  if (self.crypto && typeof self.crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    self.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex = '';
+    for (let index = 0; index < bytes.length; index += 1) {
+      hex += (bytes[index] + 0x100).toString(16).slice(1);
+    }
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+  }
+
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
 }
 
 self.addEventListener('fetch', (event) => {

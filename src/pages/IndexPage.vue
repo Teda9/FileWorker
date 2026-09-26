@@ -93,6 +93,7 @@ onMounted(async () => {
 h1 {
   margin: 0;
   color: #172033;
+  font-size: 28px;
   font-size: clamp(28px, 5vw, 38px);
   letter-spacing: -0.04em;
 }
@@ -130,6 +131,11 @@ h1 {
   transform: translateY(-2px);
   border-color: #b2ccff;
   box-shadow: 0 10px 24px #34405414;
+}
+
+.action-card:focus {
+  outline: 2px solid #84adff;
+  outline-offset: 3px;
 }
 
 .action-card:focus-visible {

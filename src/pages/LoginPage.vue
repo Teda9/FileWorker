@@ -82,6 +82,8 @@ const onSubmit = async () => {
 
 .login-card {
     display: flex;
+    width: 100%;
+    max-width: 390px;
     width: min(100%, 390px);
     flex-direction: column;
     padding: 30px;

@@ -13,6 +13,7 @@ import { useRouter } from "vue-router";
 import { takeSharedPayload } from '@/pwa/share-target';
 import { composeSharedContent } from '@/utils/clipShare';
 import { getApiErrorCode } from '@/utils/apiErrors';
+import { decodeUtf8, readFileAsText } from '@/utils/text';
 import { useI18n } from "vue-i18n";
 
 const route = useRoute();
@@ -168,7 +169,7 @@ const loadExistingContent = async () => {
 
     let content: string;
     try {
-      content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+      content = await decodeUtf8(bytes);
     } catch {
       loadError.value = $t('clip.edit_text_only');
       saveStatus.value = 'failed';
@@ -328,7 +329,7 @@ const onPasteFile = async (event: ClipboardEvent) => {
   const file = event.clipboardData?.files[0];
   if (!file || !editor || activeView.value !== 'edit') return;
 
-  const text = await file.text();
+  const text = await readFileAsText(file);
   const cursor = editor.state.selection.main.head;
   editor.dispatch({ changes: { from: cursor, insert: text } });
 };
@@ -566,6 +567,8 @@ h1 {
 }
 
 .filename-input {
+  width: 60%;
+  max-width: 320px;
   width: min(60%, 320px);
   min-width: 0;
   padding: 8px 10px;
@@ -626,6 +629,8 @@ h1 {
 
 .editor-host :deep(.cm-editor) {
   min-height: 280px;
+  height: 58vh;
+  max-height: 480px;
   height: min(58vh, 480px);
   border: 0;
 }
@@ -641,6 +646,8 @@ h1 {
 
 .preview-host {
   min-height: 280px;
+  height: 58vh;
+  max-height: 480px;
   height: min(58vh, 480px);
   overflow: auto;
   padding: 16px 20px;
@@ -663,6 +670,95 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.markdown-preview :deep(h1),
+.markdown-preview :deep(h2),
+.markdown-preview :deep(h3),
+.markdown-preview :deep(h4),
+.markdown-preview :deep(h5),
+.markdown-preview :deep(h6) {
+  color: #172033;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.markdown-preview :deep(h1) {
+  margin: 1.5em 0 0.7em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid #e4e8ee;
+  font-size: 28px;
+}
+
+.markdown-preview :deep(h2) {
+  margin: 1.4em 0 0.6em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid #eaecf0;
+  font-size: 23px;
+}
+
+.markdown-preview :deep(h3) {
+  margin: 1.3em 0 0.5em;
+  color: #344054;
+  font-size: 19px;
+}
+
+.markdown-preview :deep(h4) {
+  margin: 1.2em 0 0.5em;
+  color: #344054;
+  font-size: 16px;
+}
+
+.markdown-preview :deep(h5) {
+  margin: 1.2em 0 0.5em;
+  color: #344054;
+  font-size: 14px;
+}
+
+.markdown-preview :deep(h6) {
+  margin: 1.2em 0 0.5em;
+  color: #475467;
+  font-size: 13px;
+}
+
+.markdown-preview :deep(p) {
+  margin: 0.85em 0;
+}
+
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol) {
+  margin: 0.85em 0;
+  padding-left: 1.6em;
+}
+
+.markdown-preview :deep(li) {
+  margin: 0.25em 0;
+}
+
+.markdown-preview :deep(hr) {
+  height: 1px;
+  margin: 1.5em 0;
+  background: #e4e8ee;
+  border: 0;
+}
+
+.markdown-preview :deep(table) {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.markdown-preview :deep(th),
+.markdown-preview :deep(td) {
+  padding: 8px 10px;
+  border: 1px solid #d0d5dd;
+  text-align: left;
+}
+
+.markdown-preview :deep(th) {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
 .markdown-preview :deep(:first-child) {
   margin-top: 0;
 }
@@ -676,6 +772,14 @@ h1 {
 
 .markdown-preview :deep(code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.markdown-preview :deep(p code),
+.markdown-preview :deep(li code) {
+  padding: 0.12em 0.35em;
+  background: #f2f4f7;
+  border-radius: 4px;
+  font-size: 0.92em;
 }
 
 .markdown-preview :deep(blockquote) {

@@ -75,7 +75,7 @@ const resetPagination = () => {
 
 const refreshFiles = async () => {
     activeController?.abort();
-    const controller = new AbortController();
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
     activeController = controller;
     const requestId = ++activeRequest;
     const requestKind = props.kind;
@@ -84,13 +84,13 @@ const refreshFiles = async () => {
     errorMessage.value = '';
     successMessage.value = '';
     try {
-        const response = await ListStoredItems(requestKind, pageSize.value, cursor, searchTerm.value, controller.signal);
+        const response = await ListStoredItems(requestKind, pageSize.value, cursor, searchTerm.value, controller?.signal);
         if (requestId !== activeRequest) return;
         uploadedFiles.value = response.Contents ?? [];
         nextStartAfter.value = response.NextStartAfter;
         hasNextPage.value = response.IsTruncated;
     } catch {
-        if (requestId === activeRequest && !controller.signal.aborted) {
+        if (requestId === activeRequest && !controller?.signal.aborted) {
             errorMessage.value = $t('filemanage.load_failed');
         }
     } finally {
@@ -465,6 +465,8 @@ const closeMenuAnd = (event: MouseEvent, action: () => unknown) => {
 
 .share-dialog {
     display: flex;
+    width: 100%;
+    max-width: 420px;
     width: min(100%, 420px);
     flex-direction: column;
     gap: 14px;

@@ -72,6 +72,8 @@ FileWorker 是一个轻量级的文件管理和在线剪贴板，基于 Cloudfla
 
 文件管理和剪贴板管理已分开，支持全库搜索和 20、50、100、200、500 项分页；新保存的对象会分别放入 R2 的 `files/` 与 `clips/` 前缀，已有平铺对象和原访问链接仍可使用。主页会显示最近保存的 5 项。PWA 可添加到手机主屏幕，支持系统分享菜单发送文字或文件到 FileWorker。
 
+生产构建会同时生成现代浏览器版本和旧版兼容版本，旧版目标包含 Chrome/Android Chrome 60 及以上和 Firefox 60 及以上。旧 Android 设备尚未实机验证；浏览器内核过旧或不完整支持 Service Worker 的设备，系统分享入口可能不可用。
+
 文件下载支持单段 Range 请求和 ETag / Last-Modified 条件请求。危险的 HTML、SVG、XML、JavaScript 文件会作为附件下载。R2 对象的公开内容缓存 1 小时，私有内容不缓存。上传的最大大小可通过可选环境变量 `MAX_UPLOAD_SIZE_MB` 设置；未设置时由 Cloudflare 部署计划的请求限制决定。
 
 ### 可选：改用 Cloudflare 原生 R2 Binding

@@ -101,7 +101,9 @@ select {
   justify-content: space-between;
   gap: 20px;
   min-height: 64px;
-  padding: 10px max(20px, calc((100vw - 960px) / 2));
+  padding: 10px 20px;
+  padding-left: max(20px, calc((100vw - 960px) / 2));
+  padding-right: max(20px, calc((100vw - 960px) / 2));
   background: var(--ui-surface);
   border-bottom: 1px solid #e4e8ee;
 }
@@ -152,6 +154,8 @@ select {
 }
 
 .app-main {
+  width: calc(100% - 32px);
+  max-width: 920px;
   width: min(100% - 32px, 920px);
   margin: 0 auto;
   padding: 28px 0 48px;
@@ -235,9 +239,16 @@ select {
   border: 0;
 }
 
+a:focus,
+button:focus,
+input:focus,
+select:focus {
+  outline: 2px solid #84adff;
+  outline-offset: 2px;
+}
+
 :where(a, button, input, select):focus-visible {
   outline: 3px solid #84adff;
-  outline-offset: 2px;
 }
 
 @media (max-width: 520px) {
@@ -271,6 +282,7 @@ select {
   }
 
   .app-main {
+    width: calc(100% - 24px);
     width: min(100% - 24px, 920px);
     padding-top: 20px;
   }
